@@ -356,8 +356,16 @@ Season mechanisms live in `subsystems/` next to the drive: `IntakeSubsystem`,
   hardware, and `init` fails on a missing device.
 - `ballStaged` is null until a ball sensor is fitted.
 
-**Shooter and Turret are still unconfigured skeletons**; their `init` fails
-explicitly.
+**Shooter is implemented against the first flywheel motor; Turret is still an
+unconfigured skeleton** — its `init` fails explicitly.
+- Names are in `RobotConfig.Shooter` (a list, like Intake). Settings are in
+  `ShooterConfig`: `ticksPerRev` (goBILDA 5203 1620 RPM = 103.6), `targetRpm`,
+  `speedToleranceRpm`, and velocity `velocityP/I/D/F` (NaN keeps the hub
+  default read at init; a Panels edit applies to all flywheel motors at once).
+- `RUN_USING_ENCODER` velocity PID: `spinUp()` holds `ShooterConfig.targetRpm`,
+  `periodic()` reads the measured RPM, `atTarget` reports when to shoot. The
+  "Shooter Test" diagnostics op-mode runs it without the drivetrain: hold right
+  trigger to spin, dpad up/down steps the target ±100 RPM.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in `ShooterSubsystem.kt`), a
   distance-to-speed function still to be fitted from shots at measured
   distances (it returns null until then).

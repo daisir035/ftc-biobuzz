@@ -37,6 +37,16 @@ object RobotConfig {
         const val BLOCKER_SERVO = "blockerServo"
     }
 
+    /**
+     * Flywheel motors, mounted mirrored: [RIGHT_MOTOR]'s shaft spins opposite
+     * [LEFT_MOTOR]'s for the same flywheel motion (see ShooterSubsystem.REVERSED).
+     */
+    object Shooter {
+        const val LEFT_MOTOR = "L"
+        const val RIGHT_MOTOR = "R"
+        val MOTORS = listOf(LEFT_MOTOR, RIGHT_MOTOR)
+    }
+
     /** Game-level constants that change every season. Edit when the new game launches. */
     object Field {
         /** Distance from one end of the field to the other along the x-axis, in inches. */
