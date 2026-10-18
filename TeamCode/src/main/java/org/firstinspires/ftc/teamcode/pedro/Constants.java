@@ -23,14 +23,13 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveConfig;
  *
  * <p>Provenance of every value:
  * <ul>
- *   <li>Motor names: {@link RobotConfig.Drive}. Motor directions: carried from the
- *       Pedro 2.1.1 constants (FL/BL reversed). Re-check with AutoTune's Mecanum
+ *   <li>Motor names and directions: ported from the team's Quickstart project
+ *       (verified on hardware 2026-09-14). Re-check with AutoTune's Mecanum
  *       procedure on the competition chassis.</li>
- *   <li>Pinpoint offsets and directions: measured on the sensorbot (CAD offsets,
- *       commit 4775780; frame redefinition and encoder directions confirmed on the
- *       hardware, commit 2f13376). Pedro 2's forwardPodY/strafePodX map to
- *       xPodOffset/yPodOffset: both versions pass them to
- *       {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
+ *   <li>Pinpoint offsets and directions: Pinpoint Tuner output from the team's
+ *       Quickstart project, run on the competition robot. Pedro 2's
+ *       forwardPodY/strafePodX map to xPodOffset/yPodOffset: both versions pass
+ *       them to {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
  *   <li>Foresight: <b>not tuned</b>. Pedro 2's mass, zero-power accelerations and
  *       velocities came from the starter scaffold, were never measured on this
  *       chassis, and have no Foresight equivalent. Run AutoTune's Foresight
@@ -65,11 +64,11 @@ public final class Constants {
 
     public static final PinpointConfig localizerConfig = new PinpointConfig(c -> {
         c.name.set(RobotConfig.Localization.PINPOINT);
-        // Both pods sit on the lateral centreline, 72 mm (2.8346 in) either side of
-        // the robot centre. The forward (X) pod is on the robot's left, so its
-        // lateral offset is positive; the strafe (Y) pod has no fore/aft offset.
-        c.xPodOffset.set(2.8346);
-        c.yPodOffset.set(0.0);
+        // Pinpoint Tuner output from the team's Quickstart project, run on the
+        // competition robot. X pod REVERSED is expected when the module is
+        // mounted facing backward.
+        c.xPodOffset.set(0.29066108343169444);
+        c.yPodOffset.set(-1.2990549042468933);
         c.offsetUnits.set(DistanceUnit.INCH);
         c.globalDistanceUnit.set(DistanceUnit.INCH);
         c.xPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);

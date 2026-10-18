@@ -17,8 +17,8 @@ manual driving works and every path, hold and turn command refuses to start.
 
 ## 1. Configuration names
 
-Driver Station config names: `frontLeftMotor`, `frontRightMotor`,
-`backLeftMotor`, `backRightMotor`, Pinpoint `pinpoint`. A wrong name fails at
+Driver Station config names: `FL`, `FR`,
+`BL`, `BR`, Pinpoint `pinpoint`. A wrong name fails at
 init (Preflight lists what's missing); a *swapped* name shows up in step 2.
 
 ## 2. Motor directions (on blocks)
@@ -502,7 +502,7 @@ Record results in `PROGRESS.md`.
 **AutoTune and Pedro**
 - [ ] Mecanum Tuner confirms the four motor directions.
 - [ ] Pinpoint Tuner offsets/directions match `localizerConfig`
-      (xPodOffset 2.8346 in, yPodOffset 0, X REVERSED, Y FORWARD).
+      (xPodOffset ≈ 0.2907 in, yPodOffset ≈ −1.2991 in, X REVERSED, Y FORWARD).
 - [ ] Foresight Tuner completes; output pasted; `FORESIGHT_TUNED = true`.
       No path, hold or turn is run on the robot before this.
 - [ ] Tests → Hold resists pushing; Line and Curve repeat without drift.

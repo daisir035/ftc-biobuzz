@@ -15,10 +15,10 @@ package org.firstinspires.ftc.teamcode
 object RobotConfig {
 
     object Drive {
-        const val FRONT_LEFT_MOTOR = "frontLeftMotor"
-        const val FRONT_RIGHT_MOTOR = "frontRightMotor"
-        const val BACK_LEFT_MOTOR = "backLeftMotor"
-        const val BACK_RIGHT_MOTOR = "backRightMotor"
+        const val FRONT_LEFT_MOTOR = "FL"
+        const val FRONT_RIGHT_MOTOR = "FR"
+        const val BACK_LEFT_MOTOR = "BL"
+        const val BACK_RIGHT_MOTOR = "BR"
     }
 
     object Localization {

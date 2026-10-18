@@ -455,8 +455,8 @@ overrides `initialAlliance` only. Start delay on dpad in init, as in the example
 
 ## Naming op-modes
 
-Currently enabled: Drive Only, Ball Tracking Test, Limelight AprilTag Test,
-Hive Tag Survey, Duo Shooter Test, Shooter Test.
+Currently enabled: Drive Only, Default Auto RED/BLUE, Ball Tracking Test,
+Limelight AprilTag Test, Hive Tag Survey, Duo Shooter Test, Shooter Test.
 AutoTune is a web page, not a Driver Station op-mode. `opmodes/skeletons/` holds `@Disabled` op-modes; keep them disabled unless the
 user asks.
 
@@ -466,7 +466,7 @@ No team or season prefix. `"Match"` or `"Diagnostics"` groups. Title Case, no
 
 ## Things not to do unless explicitly asked
 
-- Don't rename hardware-map strings (`frontLeftMotor`, `pinpoint`, …).
+- Don't rename hardware-map strings (`FL`, `pinpoint`, …).
 - Don't move files between `java/` and `kotlin/` source roots.
 - Don't bump FTC SDK, Pedro, Ivy, Kotlin, AGP, Sloth or Panels versions.
   When asked to, work through **Library workarounds** as part of the bump.
