@@ -45,6 +45,9 @@ object RobotConfig {
         const val LEFT_MOTOR = "L"
         const val RIGHT_MOTOR = "R"
         val MOTORS = listOf(LEFT_MOTOR, RIGHT_MOTOR)
+
+        /** Standalone single-flywheel bench motor used by "Shooter Test". */
+        const val SINGLE_MOTOR = "shoot"
     }
 
     /** Game-level constants that change every season. Edit when the new game launches. */

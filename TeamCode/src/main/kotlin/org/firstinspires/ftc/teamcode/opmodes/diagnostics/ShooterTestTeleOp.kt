@@ -11,13 +11,15 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterConfig
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 
 /**
- * Bench test for the flywheel: hold **right trigger** to hold
- * [ShooterConfig.targetRpm] under the motor's velocity PID, **dpad up/down**
- * steps the target by ±100 RPM (also live-editable in Panels), telemetry
- * shows target vs measured RPM and the at-speed flag. Velocity PIDF is
- * tuned live in Panels (`ShooterConfig.velocityP/I/D/F`, NaN keeps the hub
- * default). No drivetrain or localizer required; the WPILOG records
- * `Shooter/…` channels, including the applied PIDF, for analysis.
+ * Bench test for the single flywheel ([RobotConfig.Shooter.SINGLE_MOTOR]):
+ * hold **right trigger** to hold [ShooterConfig.targetRpm] under the motor's
+ * velocity PID, **dpad up/down** steps the target by ±100 RPM (also
+ * live-editable in Panels), telemetry shows target vs measured RPM and the
+ * at-speed flag. Velocity PIDF is tuned live in Panels
+ * (`ShooterConfig.velocityP/I/D/F`, NaN keeps the hub default). No drivetrain
+ * or localizer required; the WPILOG records `Shooter/…` channels, including
+ * the applied PIDF, for analysis. For the dual mirrored flywheel use
+ * "Duo Shooter Test" instead.
  */
 @TeleOp(name = "Shooter Test", group = "Diagnostics")
 class ShooterTestTeleOp : OpModeBase() {
@@ -25,12 +27,12 @@ class ShooterTestTeleOp : OpModeBase() {
     private lateinit var shooter: ShooterSubsystem
 
     override val requiredDevices: List<Preflight.Requirement>
-        get() = RobotConfig.Shooter.MOTORS.map { Preflight.Requirement(it, DcMotorEx::class.java) }
+        get() = listOf(Preflight.Requirement(RobotConfig.Shooter.SINGLE_MOTOR, DcMotorEx::class.java))
     override val publishFieldView: Boolean get() = false
     override val endgameRumble: Boolean get() = false
 
     override fun configure() {
-        shooter = robot.register(ShooterSubsystem())
+        shooter = robot.register(ShooterSubsystem(listOf(RobotConfig.Shooter.SINGLE_MOTOR)))
         driver.trigger { driver.rightTrigger > 0.1 }.whileTrue(shooter.spinUp())
         driver.button(Button.DPAD_UP).onTrue(instant { ShooterConfig.targetRpm += 100.0 })
         driver.button(Button.DPAD_DOWN).onTrue(instant { ShooterConfig.targetRpm -= 100.0 })

@@ -456,7 +456,7 @@ overrides `initialAlliance` only. Start delay on dpad in init, as in the example
 ## Naming op-modes
 
 Currently enabled: Drive Only, Ball Tracking Test, Limelight AprilTag Test,
-Hive Tag Survey, Shooter Test.
+Hive Tag Survey, Duo Shooter Test, Shooter Test.
 AutoTune is a web page, not a Driver Station op-mode. `opmodes/skeletons/` holds `@Disabled` op-modes; keep them disabled unless the
 user asks.
 

@@ -14,8 +14,8 @@ import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.teamcode.core.logging.logged
 
 /**
- * Flywheel motors ([RobotConfig.Shooter.MOTORS]), all driven at one target
- * RPM. Velocity is closed-looped by the motor's built-in PID
+ * Flywheel motors ([RobotConfig.Shooter.MOTORS] by default), all driven at one
+ * target RPM. Velocity is closed-looped by the motor's built-in PID
  * (`RUN_USING_ENCODER`): commands set [targetRpm], [writeHardware] flushes it
  * as ticks/s, [periodic] reads the measured RPM back from the encoders.
  *
@@ -23,7 +23,9 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
  * model is fitted, callers pass an RPM directly ([spinUp]) and the test
  * op-mode tunes it live from Panels / the dpad.
  */
-class ShooterSubsystem : SubsystemBase("Shooter") {
+class ShooterSubsystem(
+    private val motorNames: List<String> = RobotConfig.Shooter.MOTORS,
+) : SubsystemBase("Shooter") {
 
     private var motors: List<DcMotorEx> = emptyList()
 
@@ -49,7 +51,7 @@ class ShooterSubsystem : SubsystemBase("Shooter") {
         }
 
     override fun init(hardwareMap: HardwareMap) {
-        motors = RobotConfig.Shooter.MOTORS.map { name ->
+        motors = motorNames.map { name ->
             hardwareMap.get(DcMotorEx::class.java, name).apply {
                 direction = if (name in REVERSED) DcMotorSimple.Direction.REVERSE else DcMotorSimple.Direction.FORWARD
                 zeroPowerBehavior = DcMotor.ZeroPowerBehavior.BRAKE

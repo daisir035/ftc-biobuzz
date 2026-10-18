@@ -364,8 +364,10 @@ unconfigured skeleton** — its `init` fails explicitly.
   default read at init; a Panels edit applies to all flywheel motors at once).
 - `RUN_USING_ENCODER` velocity PID: `spinUp()` holds `ShooterConfig.targetRpm`,
   `periodic()` reads the measured RPM, `atTarget` reports when to shoot. The
-  "Shooter Test" diagnostics op-mode runs it without the drivetrain: hold right
-  trigger to spin, dpad up/down steps the target ±100 RPM.
+  "Duo Shooter Test" diagnostics op-mode runs both flywheel motors and
+  "Shooter Test" runs the standalone single motor (`SINGLE_MOTOR`), each
+  without the drivetrain: hold right trigger to spin, dpad up/down steps the
+  target ±100 RPM.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in `ShooterSubsystem.kt`), a
   distance-to-speed function still to be fitted from shots at measured
   distances (it returns null until then).
