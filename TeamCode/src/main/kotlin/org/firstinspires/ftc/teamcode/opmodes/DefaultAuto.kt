@@ -42,7 +42,7 @@ open class DefaultAutoRed : OpModeBase() {
     // Poses (x, y, heading°) in RED coordinates.
     private val poses get() = alliance.poses()
     private val start get() = poses.of(56.0, 8.0, 90.0)
-    private val path1End get() = poses.of(120.6486, 53.3954, 90.0)
+    private val path1End get() = poses.of(70.7572, 21.5438, 180.0)
 
     override fun configure() {
         val follower = Constants.create(hardwareMap)

@@ -11,9 +11,10 @@ Run this after a fresh clone, a hardware rebuild, or a framework change. Do the
 steps in order, **robot on blocks until step 4.**
 
 `pedro/Constants.java` carries measured Pinpoint offsets and directions, the
-existing motor names and directions, and **no Foresight tuning**
-(`FORESIGHT_TUNED = false`). Until AutoTune's Foresight output is pasted in,
-manual driving works and every path, hold and turn command refuses to start.
+existing motor names and directions, and AutoTune's Foresight output
+(`FORESIGHT_TUNED = true`). If Foresight tuning is ever missing
+(`FORESIGHT_TUNED = false`), manual driving works and every path, hold and
+turn command refuses to start.
 
 ## 1. Configuration names
 
@@ -502,7 +503,9 @@ Record results in `PROGRESS.md`.
 **AutoTune and Pedro**
 - [ ] Mecanum Tuner confirms the four motor directions.
 - [ ] Pinpoint Tuner offsets/directions match `localizerConfig`
-      (xPodOffset ≈ 0.2907 in, yPodOffset ≈ −1.2991 in, X REVERSED, Y FORWARD).
+      (xPodOffset ≈ 1.4569 in, yPodOffset ≈ −0.9437 in, X REVERSED, Y FORWARD —
+      X direction confirmed by the push test; the Tuner's FORWARD read the X
+      pod with the wrong sign on this robot).
 - [ ] Foresight Tuner completes; output pasted; `FORESIGHT_TUNED = true`.
       No path, hold or turn is run on the robot before this.
 - [ ] Tests → Hold resists pushing; Line and Curve repeat without drift.

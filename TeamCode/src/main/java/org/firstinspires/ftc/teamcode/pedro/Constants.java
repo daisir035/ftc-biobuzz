@@ -2,7 +2,10 @@ package org.firstinspires.ftc.teamcode.pedro;
 
 import com.pedropathing.algorithm.Foresight;
 import com.pedropathing.algorithm.ForesightConfig;
+import com.pedropathing.controllers.Controller;
 import com.pedropathing.follower.Follower;
+import com.pedropathing.math.Matrix;
+import com.pedropathing.math.Vector2D;
 import com.pedropathing.revhub.drivetrains.Mecanum;
 import com.pedropathing.revhub.drivetrains.MecanumConfig;
 import com.pedropathing.revhub.localizers.PinpointConfig;
@@ -26,15 +29,13 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveConfig;
  *   <li>Motor names and directions: ported from the team's Quickstart project
  *       (verified on hardware 2026-09-14). Re-check with AutoTune's Mecanum
  *       procedure on the competition chassis.</li>
- *   <li>Pinpoint offsets and directions: Pinpoint Tuner output from the team's
- *       Quickstart project, run on the competition robot. Pedro 2's
- *       forwardPodY/strafePodX map to xPodOffset/yPodOffset: both versions pass
- *       them to {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
- *   <li>Foresight: <b>not tuned</b>. Pedro 2's mass, zero-power accelerations and
- *       velocities came from the starter scaffold, were never measured on this
- *       chassis, and have no Foresight equivalent. Run AutoTune's Foresight
- *       procedure, paste its output into {@link #foresightConfig}, then set
- *       {@link #FORESIGHT_TUNED} to true.</li>
+ *   <li>Pinpoint offsets and directions: AutoTune's Pinpoint Tuner output, run
+ *       on this robot. Pedro 2's forwardPodY/strafePodX map to
+ *       xPodOffset/yPodOffset: both versions pass them to
+ *       {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
+ *   <li>Foresight: AutoTune's Foresight procedure output, pasted verbatim into
+ *       {@link #foresightConfig}; {@link #FORESIGHT_TUNED} is true. Re-run the
+ *       procedure and re-paste after any drivetrain or weight change.</li>
  * </ul>
  *
  * <p>Pedro 2's voltage compensation has no Pedro 3 equivalent.
@@ -44,11 +45,11 @@ public final class Constants {
     private Constants() {}
 
     /**
-     * False until {@link #foresightConfig} holds AutoTune output. While false the
-     * follower has no path algorithm: manual driving works, and path, hold and turn
-     * commands refuse to start.
+     * True once {@link #foresightConfig} holds AutoTune output. If it is ever
+     * flipped back to false the follower has no path algorithm: manual driving
+     * works, and path, hold and turn commands refuse to start.
      */
-    public static final boolean FORESIGHT_TUNED = false;
+    public static final boolean FORESIGHT_TUNED = true;
 
     public static final MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
         c.frontLeftName.set(RobotConfig.Drive.FRONT_LEFT_MOTOR);
@@ -64,13 +65,15 @@ public final class Constants {
 
     public static final PinpointConfig localizerConfig = new PinpointConfig(c -> {
         c.name.set(RobotConfig.Localization.PINPOINT);
-        // Pinpoint Tuner output from the team's Quickstart project, run on the
-        // competition robot. X pod REVERSED is expected when the module is
-        // mounted facing backward.
-        c.xPodOffset.set(0.29066108343169444);
-        c.yPodOffset.set(-1.2990549042468933);
+        // Pinpoint Tuner output, run on this robot. Re-run and re-paste after
+        // moving the pod assembly.
+        c.xPodOffset.set(1.4569476270300197);
+        c.yPodOffset.set(-0.9436713241216704);
         c.offsetUnits.set(DistanceUnit.INCH);
         c.globalDistanceUnit.set(DistanceUnit.INCH);
+        // X REVERSED: the pod assembly faces backward. The Pinpoint Tuner's
+        // FORWARD suggestion read the X pod with the wrong sign on this robot;
+        // confirmed by pushing the robot and watching the Panels field view.
         c.xPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
         c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.FORWARD);
         c.podType.set(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
@@ -81,8 +84,29 @@ public final class Constants {
         c.resetMode.set(PinpointLocalizer.ResetMode.NONE);
     });
 
-    /** Paste AutoTune's Foresight output here. Required values are deliberately unset. */
+    /** AutoTune's Foresight procedure output, pasted verbatim. */
     public static final ForesightConfig foresightConfig = new ForesightConfig(c -> {
+        Controller primaryTranslationalForward = Controller.proportional(0.15325564047848608);
+        Controller secondaryTranslationalForward = Controller.proportional(0.05662386409066711);
+        Controller primaryTranslationalLateral = Controller.proportional(0.24534267817422847);
+        Controller secondaryTranslationalLateral = Controller.proportional(0.09064756390827897);
+
+        c.forwardTranslational.set(Controller.piecewise(secondaryTranslationalForward).put(2.5, primaryTranslationalForward));
+        c.strafeTranslational.set(Controller.piecewise(secondaryTranslationalLateral).put(2.5, primaryTranslationalLateral));
+
+        c.coast.set(Controller.proportionalFeedforward(0.018564902717508547));
+        c.brake.set(Controller.proportionalFeedforward(0.015780167309882263));
+
+        c.headingFeedback.set(Controller.proportional(1.5988025611530874));
+        c.headingBrakeCoefficients.set(Vector2D.cartesian(0.02260860499841661, 0.010232454306551413));
+
+        c.linearBrakeCoefficients.set(Matrix.diag(0.03690990258732756, -0.006698982990924054));
+        c.quadraticBrakeCoefficients.set(Matrix.diag(0.002431382843941635, 0.0034439014976842437));
+
+        c.maxAchievableForwardVelocity.set(57.37232242800095);
+        c.maxAchievableStrafeVelocity.set(49.99157880573599);
+        c.naturalForwardDeceleration.set(61.98385527089174);
+        c.naturalStrafeDeceleration.set(83.19735660411557);
     });
 
     /**

@@ -200,11 +200,12 @@ Verified 3.0.1 behaviour to respect:
 
 Configuration lives in `pedro/Constants.java` in AutoTune's layout
 (`drivetrainConfig`, `localizerConfig`, `foresightConfig`, `create()`).
-`FORESIGHT_TUNED` is false until AutoTune's Foresight output is pasted; until
-then the follower has no algorithm, manual driving works, and path, hold and
-turn commands throw at start. AutoTune procedures in `pedro/procedures/` are
-copied unmodified from Pedro-Pathing/Quickstart b4312385; `pedro/Tuning.java`
-registers the Mecanum, Pinpoint, Foresight and Tests procedures.
+`FORESIGHT_TUNED` is true: `foresightConfig` holds AutoTune's Foresight
+output. If it is ever false the follower has no algorithm, manual driving
+works, and path, hold and turn commands throw at start. AutoTune procedures in
+`pedro/procedures/` are copied unmodified from Pedro-Pathing/Quickstart
+b4312385; `pedro/Tuning.java` registers the Mecanum, Pinpoint, Foresight and
+Tests procedures.
 
 ## Drive commands
 
@@ -387,8 +388,10 @@ loop keeps running.
 - **Mirroring:** `Alliance.poses()` / `Alliance.mirror`, field length
   `RobotConfig.Field.LENGTH_INCHES` (**141.5**), symmetry
   `RobotConfig.Field.SYMMETRY`. Not `PoseFactory.mirrorX`, which only reflects.
-- **Foresight constants are not tuned.** Never invent values; run AutoTune.
-  The Pedro docs' example ForesightConfig numbers are another robot's.
+- **Foresight constants come from AutoTune.** Never invent values or paste the
+  Pedro docs' example ForesightConfig numbers — those are another robot's. The
+  current values are AutoTune output; re-run the procedure after drivetrain or
+  weight changes.
 - **Only `Field/Robot` is rotated.** Pedro's frame (origin at the corner on
   the audience's left, +X along the audience wall) and the FTC frame
   AdvantageScope draws (origin at the centre, +Y from the red wall to the
