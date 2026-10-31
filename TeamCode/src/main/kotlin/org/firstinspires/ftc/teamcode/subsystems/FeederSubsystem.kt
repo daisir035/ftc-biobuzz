@@ -76,10 +76,9 @@ class FeederSubsystem : SubsystemBase("Feeder") {
     private companion object {
         /**
          * Motor names whose positive power runs balls away from the flywheel.
-         * The feeder feeds clockwise seen from the shaft end; the SDK turns a
-         * FORWARD motor counter-clockwise on positive power, so it is reversed.
+         * This robot's feeder feeds with FORWARD, so none are reversed.
          */
-        val REVERSED = setOf(RobotConfig.Feeder.MOTOR)
+        val REVERSED = emptySet<String>()
     }
 }
 

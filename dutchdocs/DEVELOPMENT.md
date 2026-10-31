@@ -290,11 +290,9 @@ Season mechanisms live in `subsystems/` next to the drive: `IntakeSubsystem`,
 **Shooter, Feeder and the "Competition" teleop are implemented; Turret is
 still an unconfigured skeleton** — its `init` fails explicitly.
 - Hardware names: intake `intake`, feeder `feeder`, flywheel `up` / `down`
-  (`RobotConfig`). All are goBILDA 5203 1620 RPM. Directions, seen from the
-  shaft end (the SDK turns a FORWARD motor counter-clockwise on positive
-  power): intake collects counter-clockwise (FORWARD), feeder feeds clockwise
-  (REVERSE), `up` launches counter-clockwise (FORWARD), `down` clockwise
-  (REVERSE). Verify at low power before the first full-speed run.
+  (`RobotConfig`). All are goBILDA 5203 1620 RPM. SDK directions for this robot's
+  mounting: intake REVERSE, feeder FORWARD, `up` FORWARD, `down` REVERSE.
+  Verify at low power before the first full-speed run.
 - The two flywheel motors are synchronized, so only `up`'s encoder
   (`RobotConfig.Shooter.FEEDBACK_MOTOR`) is read and both get the same power.
   The velocity PIDF runs in `ShooterSubsystem` (motors in

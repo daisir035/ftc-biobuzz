@@ -34,7 +34,7 @@ object RobotConfig {
         const val BALL_CAMERA = "ballCamera"
     }
 
-    /** Intake motors; add a name when a second motor is fitted. Collects counter-clockwise seen from the shaft end. */
+    /** Intake motors; add a name when a second motor is fitted. Direction is set in IntakeSubsystem. */
     object Intake {
         val MOTORS = listOf("intake")
     }
@@ -45,7 +45,7 @@ object RobotConfig {
         const val BLOCKER_SERVO = "blockerServo"
     }
 
-    /** Motor that pushes balls from the intake into the flywheel; feeds clockwise seen from the shaft end. */
+    /** Motor that pushes balls from the intake into the flywheel. Direction is set in FeederSubsystem. */
     object Feeder {
         const val MOTOR = "feeder"
         val MOTORS = listOf(MOTOR)
