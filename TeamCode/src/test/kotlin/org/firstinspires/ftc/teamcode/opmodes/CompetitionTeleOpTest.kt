@@ -4,6 +4,7 @@ import com.pedropathing.ivy.Command
 import com.pedropathing.ivy.Scheduler
 import org.firstinspires.ftc.teamcode.core.sim.ConfigSnapshot
 import org.firstinspires.ftc.teamcode.core.sim.FakeHardwareMap
+import org.firstinspires.ftc.teamcode.core.sim.FakeClock
 import org.firstinspires.ftc.teamcode.core.sim.MotorProbe
 import org.firstinspires.ftc.teamcode.subsystems.FeederConfig
 import org.firstinspires.ftc.teamcode.subsystems.FeederSubsystem
@@ -109,5 +110,25 @@ class CompetitionTeleOpTest {
         Scheduler.schedule(shot)
         repeat(4) { tick() }
         assertFeedPower(0.0)
+    }
+
+    @Test
+    fun shootingCancelsThePendingIntakeReverse() {
+        val clock = FakeClock()
+        var intaking = true
+        val assist = feeder.intakeAssist({ intaking }, clock)
+        Scheduler.schedule(assist)
+        tick()
+        intaking = false
+        tick()
+
+        Scheduler.schedule(shot)
+        clock.advanceMs(1000.0)
+        repeat(4) { tick() }
+        assertFeedPower(0.0)
+
+        up.velocity = 1730.0
+        repeat(4) { tick() }
+        assertFeedPower(1.0)
     }
 }

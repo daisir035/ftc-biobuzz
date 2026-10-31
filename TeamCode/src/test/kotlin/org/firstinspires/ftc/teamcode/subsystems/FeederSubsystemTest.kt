@@ -4,9 +4,11 @@ import com.pedropathing.ivy.Scheduler
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.sim.ConfigSnapshot
 import org.firstinspires.ftc.teamcode.core.sim.FakeHardwareMap
+import org.firstinspires.ftc.teamcode.core.sim.FakeClock
 import org.firstinspires.ftc.teamcode.core.sim.MotorProbe
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
 
@@ -67,6 +69,66 @@ class FeederSubsystemTest {
 
         ready = false
         Scheduler.schedule(feed)
+        tick()
+        assertPower(0.0)
+    }
+
+    @Test
+    fun intakeAssistRunsSlowlyThenWaitsAndReversesBrieflyOnRelease() {
+        val clock = FakeClock()
+        var intaking = true
+        FeederConfig.intakePower = 0.2
+        FeederConfig.intakeReleaseDelayMs = 200.0
+        FeederConfig.intakeReversePower = -0.2
+        FeederConfig.intakeReverseMs = 150.0
+        val assist = feeder.intakeAssist({ intaking }, clock)
+        Scheduler.schedule(assist)
+        tick()
+        assertPower(0.2)
+
+        intaking = false
+        tick()
+        assertPower(0.0)
+        clock.advanceMs(199.0)
+        tick()
+        assertPower(0.0)
+        clock.advanceMs(1.0)
+        tick()
+        assertPower(-0.2)
+        clock.advanceMs(149.0)
+        tick()
+        assertPower(-0.2)
+        clock.advanceMs(1.0)
+        tick()
+        assertPower(0.0)
+        assertFalse(Scheduler.isScheduled(assist))
+    }
+
+    @Test
+    fun aNewIntakeCancelsThePreviousReverseAndRestartsTheReleaseTimer() {
+        val clock = FakeClock()
+        var intaking = true
+        FeederConfig.intakePower = 0.2
+        FeederConfig.intakeReleaseDelayMs = 200.0
+        FeederConfig.intakeReversePower = -0.2
+        FeederConfig.intakeReverseMs = 150.0
+        val assist = feeder.intakeAssist({ intaking }, clock)
+        Scheduler.schedule(assist)
+        tick()
+        intaking = false
+        tick()
+        clock.advanceMs(200.0)
+        tick()
+        assertPower(-0.2)
+
+        intaking = true
+        Scheduler.schedule(assist)
+        tick()
+        assertPower(0.2)
+        clock.advanceMs(1000.0)
+        tick()
+        assertPower(0.2)
+        intaking = false
         tick()
         assertPower(0.0)
     }

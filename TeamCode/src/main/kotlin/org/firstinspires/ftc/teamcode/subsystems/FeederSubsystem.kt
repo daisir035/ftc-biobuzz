@@ -7,6 +7,7 @@ import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.DcMotorSimple
 import com.qualcomm.robotcore.hardware.HardwareMap
 import org.firstinspires.ftc.teamcode.RobotConfig
+import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.teamcode.core.logging.logged
@@ -14,7 +15,7 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
 /**
  * The motor that pushes balls from the intake into the flywheel
  * ([RobotConfig.Feeder.MOTORS]); positive feeds toward the flywheel. No
- * blocker servo and, for now, no reverse. Off unless a command runs it.
+ * blocker servo. Off unless a command runs it.
  */
 class FeederSubsystem : SubsystemBase("Feeder") {
 
@@ -35,6 +36,36 @@ class FeederSubsystem : SubsystemBase("Feeder") {
 
     override fun writeHardware() {
         motors.forEach { it.power = power }
+    }
+
+    /** Low-power assist while intaking, then a delayed reverse pulse after release. */
+    fun intakeAssist(intaking: () -> Boolean, clock: Clock = Clock.SYSTEM): Command {
+        var releasedAtNs: Long? = null
+        return logged(
+            "Feeder intake assist",
+            Command.build()
+                .requiring(this)
+                .setStart { releasedAtNs = null }
+                .setExecute {
+                    if (intaking()) {
+                        releasedAtNs = null
+                        power = FeederConfig.intakePower
+                    } else {
+                        val now = clock.nanos()
+                        val releasedAt = releasedAtNs ?: now.also { releasedAtNs = it }
+                        val elapsedMs = (now - releasedAt) / 1e6
+                        power = if (elapsedMs >= FeederConfig.intakeReleaseDelayMs &&
+                            elapsedMs < FeederConfig.intakeReleaseDelayMs + FeederConfig.intakeReverseMs
+                        ) FeederConfig.intakeReversePower else 0.0
+                    }
+                }
+                .setDone {
+                    releasedAtNs?.let {
+                        (clock.nanos() - it) / 1e6 >= FeederConfig.intakeReleaseDelayMs + FeederConfig.intakeReverseMs
+                    } ?: false
+                }
+                .setEnd { power = 0.0 },
+        )
     }
 
     /**
@@ -86,4 +117,8 @@ class FeederSubsystem : SubsystemBase("Feeder") {
 @Configurable
 object FeederConfig {
     @JvmField var feedPower = 1.0
+    @JvmField var intakePower = 0.2
+    @JvmField var intakeReleaseDelayMs = 200.0
+    @JvmField var intakeReversePower = -0.2
+    @JvmField var intakeReverseMs = 150.0
 }

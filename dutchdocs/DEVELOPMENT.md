@@ -310,11 +310,17 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   `measuredRpm`, `batteryVolts` in the log.
 - Feeder: `feedOnceReady { shooter.atTarget }` waits for the flywheel to
   reach speed once, then feeds without pausing until released, so a burst
-  is continuous. No reverse for now.
+  is continuous.
 - "Competition" (`opmodes/CompetitionTeleOp.kt`): driver R1/L1 hold
   collect/eject; operator Cross toggles the flywheel, dpad up/down picks
   far/near, R2 (hold) shoots — wait for the flywheel to reach speed once,
   then run intake and feeder together without pausing until released.
+- While driver R1 collects, feeder assists at `FeederConfig.intakePower`
+  (0.2). Releasing R1 stops the intake and feeder, waits
+  `intakeReleaseDelayMs` (200 ms), then reverses the feeder at
+  `intakeReversePower` (-0.2) for `intakeReverseMs` (150 ms). These settings
+  are live in Panels. A new R1 press restarts the intake assist; R2 shooting
+  cancels the assist and any pending reverse pulse.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
   `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted

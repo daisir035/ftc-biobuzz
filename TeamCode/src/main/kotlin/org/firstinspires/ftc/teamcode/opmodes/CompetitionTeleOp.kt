@@ -20,7 +20,8 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
  * Match teleop: drive plus intake, feeder and the dual flywheel.
  *
  * Driver (gamepad1), on top of [TeleOpBase]'s drive controls:
- *  - **R1** (hold) — intake collect
+ *  - **R1** (hold) — intake collect with low-power feeder assist; release
+ *    stops the intake and gives the feeder a delayed reverse pulse
  *  - **L1** (hold) — intake eject
  *
  * Operator (gamepad2):
@@ -59,6 +60,7 @@ class CompetitionTeleOp : TeleOpBase() {
         shooter = robot.register(ShooterSubsystem())
 
         driver.button(Button.R1).whileTrue(intake.collect())
+            .onTrue(feeder.intakeAssist(intaking = { driver.held(Button.R1) }))
         driver.button(Button.L1).whileTrue(intake.eject())
 
         operator.button(Button.CROSS).toggleOnTrue(shooter.spinUp { presetRpm })
