@@ -12,13 +12,13 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 
 /**
  * Bench test for the dual flywheel (both motors in [RobotConfig.Shooter.MOTORS]):
- * hold **right trigger** to hold [ShooterConfig.targetRpm] under the motor's
- * velocity PID, **dpad up/down** steps the target by ±100 RPM (also
+ * hold **right trigger** to hold [ShooterConfig.targetRpm] under the
+ * flywheel's velocity PIDF, **dpad up/down** steps the target by ±100 RPM (also
  * live-editable in Panels), telemetry shows target vs measured RPM and the
- * at-speed flag. Velocity PIDF is tuned live in Panels
- * (`ShooterConfig.velocityP/I/D/F`, NaN keeps the hub default). No drivetrain
+ * at-speed flag. Gains are tuned live in Panels
+ * (`ShooterConfig.kF/kP/kI/kD`). No drivetrain
  * or localizer required; the WPILOG records `Shooter/…` channels, including
- * the applied PIDF, for analysis. For the single-flywheel bench motor
+ * the motor power, for analysis. For the single-flywheel bench motor
  * ([RobotConfig.Shooter.SINGLE_MOTOR]) use "Shooter Test" instead.
  */
 @TeleOp(name = "Duo Shooter Test", group = "Diagnostics")
@@ -47,6 +47,7 @@ class DuoShooterTestTeleOp : OpModeBase() {
             put("target rpm", ShooterConfig.targetRpm, decimals = 0)
             put("measured rpm", shooter.measuredRpm, decimals = 0)
             put("at speed", shooter.atTarget)
+            put("power", shooter.power, decimals = 2)
         }
     }
 }

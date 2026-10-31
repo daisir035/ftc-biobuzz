@@ -1,0 +1,87 @@
+package org.firstinspires.ftc.teamcode.opmodes
+
+import com.pedropathing.ivy.Command
+import com.pedropathing.ivy.commands.Commands.instant
+import com.pedropathing.ivy.groups.Groups.parallel
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp
+import com.qualcomm.robotcore.hardware.DcMotorEx
+import org.firstinspires.ftc.teamcode.RobotConfig
+import org.firstinspires.ftc.teamcode.core.GamepadEx.Button
+import org.firstinspires.ftc.teamcode.core.Preflight
+import org.firstinspires.ftc.teamcode.core.logging.logged
+import org.firstinspires.ftc.teamcode.subsystems.FeederSubsystem
+import org.firstinspires.ftc.teamcode.subsystems.IntakeSubsystem
+import org.firstinspires.ftc.teamcode.subsystems.ShooterConfig
+import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
+
+/**
+ * Match teleop: drive plus intake, feeder and the dual flywheel.
+ *
+ * Driver (gamepad1), on top of [TeleOpBase]'s drive controls:
+ *  - **right bumper** (hold) — intake collect
+ *  - **left bumper** (hold) — intake eject
+ *
+ * Operator (gamepad2):
+ *  - **A** — flywheel on/off at the selected preset
+ *  - **dpad up / down** — far / near preset ([ShooterConfig.farRpm] / [ShooterConfig.nearRpm])
+ *  - **right trigger** (hold) — shoot: the intake runs at once; the feeder
+ *    starts the first time the flywheel is at speed and then feeds without
+ *    pausing, so the whole burst goes out continuously
+ *
+ * Shooting takes the intake, so it overrides the driver's collect until released.
+ */
+@TeleOp(name = "Competition", group = "Match")
+class CompetitionTeleOp : TeleOpBase() {
+
+    private enum class Preset { NEAR, FAR }
+
+    private lateinit var intake: IntakeSubsystem
+    private lateinit var feeder: FeederSubsystem
+    private lateinit var shooter: ShooterSubsystem
+
+    private var preset = Preset.NEAR
+
+    private val presetRpm: Double
+        get() = when (preset) {
+            Preset.NEAR -> ShooterConfig.nearRpm
+            Preset.FAR -> ShooterConfig.farRpm
+        }
+
+    override val requiredDevices: List<Preflight.Requirement>
+        get() = Preflight.standard +
+            (RobotConfig.Intake.MOTORS + RobotConfig.Feeder.MOTORS + RobotConfig.Shooter.MOTORS)
+                .map { Preflight.Requirement(it, DcMotorEx::class.java) }
+
+    override fun configureTeleop() {
+        intake = robot.register(IntakeSubsystem())
+        feeder = robot.register(FeederSubsystem())
+        shooter = robot.register(ShooterSubsystem())
+
+        driver.button(Button.RIGHT_BUMPER).whileTrue(intake.collect())
+        driver.button(Button.LEFT_BUMPER).whileTrue(intake.eject())
+
+        operator.button(Button.A).toggleOnTrue(shooter.spinUp { presetRpm })
+        operator.button(Button.DPAD_UP).onTrue(instant { preset = Preset.FAR })
+        operator.button(Button.DPAD_DOWN).onTrue(instant { preset = Preset.NEAR })
+        operator.trigger { operator.rightTrigger > 0.3 }.whileTrue(shoot())
+    }
+
+    private fun shoot(): Command = logged(
+        "Shoot",
+        parallel(intake.collect(), feeder.feedOnceReady { shooter.atTarget }),
+    )
+
+    override fun onLoop() {
+        telemetryBag.section("Shooter") {
+            put("preset", preset)
+            put("target rpm", shooter.targetRpm ?: 0.0, decimals = 0)
+            put("measured rpm", shooter.measuredRpm, decimals = 0)
+            put("at speed", shooter.atTarget)
+            put("power", shooter.power, decimals = 2)
+        }
+        telemetryBag.section("Drive") {
+            put("pose", drive.pose)
+            put("fieldCentric", drive.fieldCentric)
+        }
+    }
+}
