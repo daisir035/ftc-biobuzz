@@ -6,13 +6,14 @@ import com.pedropathing.controllers.Controller;
 import com.pedropathing.follower.Follower;
 import com.pedropathing.math.Matrix;
 import com.pedropathing.math.Vector2D;
-import com.pedropathing.revhub.drivetrains.Mecanum;
 import com.pedropathing.revhub.drivetrains.MecanumConfig;
 import com.pedropathing.revhub.localizers.PinpointConfig;
 import com.pedropathing.revhub.localizers.PinpointLocalizer;
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver;
 import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
+
+import java.util.function.DoubleSupplier;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.teamcode.RobotConfig;
@@ -34,11 +35,13 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveConfig;
  *       xPodOffset/yPodOffset: both versions pass them to
  *       {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
  *   <li>Foresight: AutoTune's Foresight procedure output, pasted verbatim into
- *       {@link #foresightConfig}; {@link #FORESIGHT_TUNED} is true. Re-run the
- *       procedure and re-paste after any drivetrain or weight change.</li>
+ *       {@link #foresightConfig}; {@link #FORESIGHT_TUNED} is true. These values
+ *       predate voltage compensation: re-run through compensation at 12.0 V after
+ *       the 2026-10-25 sync, and after any drivetrain or weight change.</li>
  * </ul>
  *
- * <p>Pedro 2's voltage compensation has no Pedro 3 equivalent.
+ * <p>Pedro 3 has no voltage compensation for mecanum; {@link VoltageCompensatedMecanum}
+ * adds it, for the op-modes and AutoTune alike.
  */
 public final class Constants {
 
@@ -51,6 +54,13 @@ public final class Constants {
      */
     public static final boolean FORESIGHT_TUNED = true;
 
+    /**
+     * The battery voltage {@link #foresightConfig} is expressed at: every follower power
+     * is scaled by NOMINAL_VOLTS / battery volts. Keep this at 12.0 while re-running
+     * AutoTune through the same compensation; do not copy another robot's loaded voltage.
+     */
+    public static final double NOMINAL_VOLTS = 12.0;
+
     public static final MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
         c.frontLeftName.set(RobotConfig.Drive.FRONT_LEFT_MOTOR);
         c.backLeftName.set(RobotConfig.Drive.BACK_LEFT_MOTOR);
@@ -58,8 +68,8 @@ public final class Constants {
         c.backRightName.set(RobotConfig.Drive.BACK_RIGHT_MOTOR);
 
         c.frontLeftDirection.set(DcMotorSimple.Direction.REVERSE);
-        c.backLeftDirection.set(DcMotorSimple.Direction.REVERSE);
         c.frontRightDirection.set(DcMotorSimple.Direction.FORWARD);
+        c.backLeftDirection.set(DcMotorSimple.Direction.REVERSE);
         c.backRightDirection.set(DcMotorSimple.Direction.FORWARD);
     });
 
@@ -119,12 +129,16 @@ public final class Constants {
      * writes, so a background poll starves on link contention (~12–25 ms per
      * read) while the main loop spins on a stale pose.
      */
-    public static Follower create(HardwareMap hardwareMap) {
+    public static Follower create(HardwareMap hardwareMap, DoubleSupplier batteryVolts) {
         drivetrainConfig.manualBrakeMode.set(DriveConfig.brakeOnTeleop);
         return new Follower(
                 new PinpointLocalizer(hardwareMap, localizerConfig),
-                new Mecanum(hardwareMap, drivetrainConfig),
+                drivetrain(hardwareMap, batteryVolts),
                 FORESIGHT_TUNED ? new Foresight(foresightConfig) : null
         );
+    }
+
+    public static VoltageCompensatedMecanum drivetrain(HardwareMap hardwareMap, DoubleSupplier batteryVolts) {
+        return new VoltageCompensatedMecanum(hardwareMap, drivetrainConfig, NOMINAL_VOLTS, batteryVolts);
     }
 }

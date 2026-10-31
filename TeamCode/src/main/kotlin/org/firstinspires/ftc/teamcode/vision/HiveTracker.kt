@@ -5,6 +5,7 @@ import java.util.EnumMap
 import java.util.Locale
 import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
+import org.firstinspires.ftc.teamcode.core.logging.Events
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.teamcode.subsystems.LimelightFiducial
 import org.firstinspires.ftc.teamcode.subsystems.LimelightSubsystem
@@ -96,7 +97,6 @@ class HiveTracker(
     priors: Map<Alliance, HiveState?> = emptyMap(),
     private val poseAt: ((Long) -> Pose?)? = null,
     private val currentPose: (() -> Pose?)? = null,
-    private val eventSink: (String) -> Unit = {},
     private val clock: Clock = Clock.SYSTEM,
 ) : SubsystemBase("Hive") {
 
@@ -192,7 +192,7 @@ class HiveTracker(
         for ((alliance, hive) in hives) {
             vote(alliance)?.let { v ->
                 hive.observe(v, captureNanos, HiveConfig.tipConfirmFrames)?.let {
-                    eventSink(it.describe())
+                    Events.record(it.describe())
                     held.remove(alliance)
                 }
             }

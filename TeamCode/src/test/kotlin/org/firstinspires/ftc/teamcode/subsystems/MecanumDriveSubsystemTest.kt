@@ -126,41 +126,6 @@ class MecanumDriveSubsystemTest {
     }
 
     @Test
-    fun turnPowerBypassesTheStickCurveAndTheStickNegation() {
-        val h = Harness()
-        h.input = TeleopInput(0.0, 0.0, turn = 1.0, turnPower = 0.1)
-        h.tick()
-        assertArrayEquals(wheels(0.0, 0.0, 0.1), h.hardware.powers(), 1e-9)
-    }
-
-    @Test
-    fun nonFiniteAssistPowersCommandZeroInsteadOfNaNingTheMotors() {
-        val h = Harness()
-        h.input = TeleopInput(0.0, 0.0, 0.0, turnPower = Double.NaN, forwardPower = Double.POSITIVE_INFINITY)
-        h.tick()
-        assertArrayEquals(DoubleArray(4), h.hardware.powers(), 1e-9)
-    }
-
-    @Test
-    fun forwardPowerForcesRobotCentricEvenWhenFieldCentricIsOn() {
-        val h = Harness(heading = Math.PI / 2)
-        assertTrue(h.drive.fieldCentric)
-        h.input = TeleopInput(forward = 1.0, strafe = 0.0, turn = 0.0, forwardPower = 0.2)
-        h.tick()
-        assertArrayEquals(wheels(0.2, 0.0, 0.0), h.hardware.powers(), 1e-9)
-    }
-
-    @Test
-    fun forwardAndTurnPowerComposeWhileTheDriverKeepsStrafe() {
-        val h = Harness()
-        h.input = TeleopInput(forward = 0.0, strafe = 1.0, turn = 0.0, turnPower = -0.15, forwardPower = 0.25)
-        h.tick()
-        val fwd = 0.25 / Math.hypot(0.25, 1.0).coerceAtLeast(1.0)
-        val strafe = -1.0 / Math.hypot(0.25, 1.0).coerceAtLeast(1.0)
-        assertArrayEquals(wheels(fwd, strafe, -0.15), h.hardware.powers(), 1e-9)
-    }
-
-    @Test
     fun precisionScalesStickInput() {
         val h = Harness()
         h.input = TeleopInput(1.0, 0.0, 0.0, precision = true)
@@ -174,12 +139,12 @@ class MecanumDriveSubsystemTest {
         h.input = TeleopInput(0.5, 0.0, 0.0)
         h.tick()
         val assist = h.drive.teleopCommand {
-            TeleopInput(0.0, 0.0, 0.0, turnPower = 0.3)
+            TeleopInput(0.0, 0.0, -1.0) // full CCW turn
         }
         Scheduler.schedule(assist)
         assertFalse(Scheduler.isScheduled(h.teleop))
         h.tick()
-        assertArrayEquals(wheels(0.0, 0.0, 0.3), h.hardware.powers(), 1e-9)
+        assertArrayEquals(wheels(0.0, 0.0, 1.0), h.hardware.powers(), 1e-9)
         Scheduler.cancel(assist)
         h.tick()
         assertTrue(Scheduler.isScheduled(h.teleop))
@@ -225,18 +190,66 @@ class MecanumDriveSubsystemTest {
     }
 
     @Test
-    fun motorChannelsSampleOneMotorRoundRobin() {
+    fun motorChannelsLogCommandedPowerAndEncoderVelocityEveryTick() {
+        val h = Harness()
+        h.hardware.motors.forEachIndexed { i, motor -> motor.velocity = 100.0 * (i + 1) }
+        h.input = TeleopInput(0.5, 0.0, 0.3)
+        h.tick()
+        val log = RecordingStateLog()
+        h.drive.logState(log)
+        assertTrue(log.channels.containsKey("fieldCentric"))
+        assertTrue(log.channels.containsKey("odometryFallback"))
+        assertArrayEquals(h.hardware.powers(), log.channels["motors/power"] as DoubleArray, 1e-9)
+        assertArrayEquals(doubleArrayOf(100.0, 200.0, 300.0, 400.0), log.channels["motors/velocityTps"] as DoubleArray, 1e-9)
+    }
+
+    @Test
+    fun loggedPowerIsZeroOnceTheDrivetrainStops() {
+        val h = Harness()
+        h.input = TeleopInput(1.0, 0.0, 0.0)
+        h.tick()
+        Scheduler.cancel(h.teleop)
+        h.drive.defaultCommand = null
+        h.tick()
+        val log = RecordingStateLog()
+        h.drive.logState(log)
+        assertArrayEquals(DoubleArray(4), log.channels["motors/power"] as DoubleArray, 1e-9)
+
+        val stopped = Harness()
+        stopped.input = TeleopInput(1.0, 0.0, 0.0)
+        stopped.tick()
+        stopped.robot.stop()
+        stopped.drive.logState(log)
+        assertArrayEquals(DoubleArray(4), log.channels["motors/power"] as DoubleArray, 1e-9)
+    }
+
+    @Test
+    fun currentIsSampledOneMotorAtATimeRoundRobin() {
         val h = Harness()
         val log = RecordingStateLog()
         h.tick()
         h.drive.logState(log)
-        assertTrue(log.channels.containsKey("fieldCentric"))
-        assertTrue(log.channels.containsKey("odometryFallback"))
-        assertTrue(log.channels.containsKey("motors/leftFront/power"))
+        assertTrue(log.channels.containsKey("motors/leftFront/currentAmps"))
         log.channels.clear()
-        h.tick(60.0)
+        h.tick(100.0)
         h.drive.logState(log)
-        assertTrue(log.channels.containsKey("motors/leftRear/currentAmps"))
+        assertFalse(log.channels.keys.any { it.endsWith("currentAmps") })
+        h.tick(100.0)
+        h.drive.logState(log)
+        assertTrue(log.channels.containsKey("motors/rightFront/currentAmps"))
+    }
+
+    @Test
+    fun aCurrentSampleWaitsForTheRecorderAndIsLoggedOnce() {
+        val h = Harness()
+        val log = RecordingStateLog()
+        h.tick()
+        h.tick(10.0)
+        h.drive.logState(log)
+        assertTrue(log.channels.containsKey("motors/leftFront/currentAmps"))
+        log.channels.clear()
+        h.drive.logState(log)
+        assertFalse(log.channels.keys.any { it.endsWith("currentAmps") })
     }
 
     private class RecordingStateLog : StateLog {

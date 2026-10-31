@@ -2,11 +2,13 @@ package org.firstinspires.ftc.teamcode.subsystems
 
 import com.pedropathing.math.Pose
 import kotlin.math.PI
+import org.firstinspires.ftc.teamcode.core.logging.Events
 import org.firstinspires.ftc.teamcode.core.sim.FakeClock
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class LocalizerSubsystemTest {
@@ -14,11 +16,16 @@ class LocalizerSubsystemTest {
     private val clock = FakeClock(start = 0L)
     private val follower = PedroDriveFixture(tuned = false).follower
     private val events = mutableListOf<String>()
-    private val localizer = LocalizerSubsystem(follower, clock, onEvent = events::add)
+    private val localizer = LocalizerSubsystem(follower, clock, onFault = {}, onStatusFault = {})
+
+    @Before
+    fun captureEvents() {
+        Events.sink = events::add
+    }
 
     @After
     fun restoreConfig() {
-        LocalizerConfig.watchdogEnabled = true
+        Events.reset()
         LocalizerConfig.frozenPoseTicks = 25
     }
 
@@ -39,11 +46,12 @@ class LocalizerSubsystemTest {
         val follower = PedroDriveFixture(tuned = false).follower
         var faults = 0
         val events = mutableListOf<String>()
+        init { Events.sink = events::add }
         val localizer = LocalizerSubsystem(
             follower,
-            onEvent = events::add,
             isFollowing = { following },
             onFault = { faults++ },
+            onStatusFault = { faults++ },
         ).also(::initialized)
 
         fun setPose(x: Double, y: Double, heading: Double) {
@@ -110,25 +118,13 @@ class LocalizerSubsystemTest {
     }
 
     @Test
-    fun watchdogCanBeDisabled() {
-        LocalizerConfig.watchdogEnabled = false
-        val h = WatchdogHarness()
-        h.setPose(Double.NaN, 0.0, 0.0)
-
-        h.localizer.periodic()
-
-        assertNull(h.localizer.fault)
-        assertEquals(0, h.faults)
-    }
-
-    @Test
     fun watchdogSurvivesThrowingFaultPolicy() {
         val h = WatchdogHarness()
         val localizer = LocalizerSubsystem(
             h.follower,
-            onEvent = h.events::add,
             isFollowing = { true },
             onFault = { error("policy blew up") },
+            onStatusFault = { error("policy blew up") },
         ).also(::initialized)
         h.setPose(Double.NaN, 0.0, 0.0)
 

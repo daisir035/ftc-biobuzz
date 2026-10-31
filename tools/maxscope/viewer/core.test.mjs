@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {activeCommandSpans, fieldPoint, fieldView, ballSighting, ballEstimate, cameraDetections, loggedCameraMount, cameraSources, sampleAt, plotPoints, plotBounds, scalarSeries, channelOptions, channelTree, discreteOptions, discreteSeries, discreteIntervals} from './core.mjs';
+import {activeCommandSpans, fieldPoint, fieldView, ballSighting, ballEstimate, cameraDetections, loggedCameraMount, cameraSources, sampleAt, plotPoints, plotBounds, plotMargins, extremes, scalarSeries, channelOptions, channelTree, discreteOptions, discreteSeries, discreteIntervals, alignmentAnchor, shiftSeries, adjacentProblem, problemsAt, matchPhases, phaseAt, posePasses, nextPass, followWindow} from './core.mjs';
 
 test('Pedro field corners retain their axes with only screen Y inverted', () => {
   const view = {minX: 0, minY: 0, span: 141.5};
@@ -10,23 +10,25 @@ test('Pedro field corners retain their axes with only screen Y inverted', () => 
   assert.ok(Math.abs(x - 36) < 1e-10 && Math.abs(y - 181) < 1e-10);
 });
 
-test('field view stays on the field when the path does', () => {
-  const view = fieldView([[0, [8, 56, 0]], [1, [141.5, 0, 0]], [2, [NaN, 900, 0]]], 141.5);
-  assert.deepEqual(view, {minX: 0, minY: 0, span: 141.5, tile: 141.5 / 6, tiles: 6, slack: 141.5 / 24});
+test('field view stays on the field when the whole robot does', () => {
+  const view = fieldView([[0, [8, 56, 0]], [1, [133.5, 8, 0]], [2, [NaN, 900, 0]]], 141.5);
+  assert.deepEqual(view, {minX: 0, minY: 0, span: 141.5, tile: 141.5 / 6, tiles: 6});
   assert.deepEqual(fieldView([], 141.5).tiles, 6);
 });
 
-test('field view ignores a pose just past a wall', () => {
-  assert.equal(fieldView([[0, [-5, 72, 0]], [1, [72, 149, 0]]], 144).tiles, 6);
-  assert.equal(fieldView([[0, [-7, 72, 0]]], 144).minX, -24);
+test('field view grows to show a robot that is partly over a wall', () => {
+  assert.equal(fieldView([[0, [8, 72, 0]]], 144).tiles, 6);
+  assert.equal(fieldView([[0, [8.2, 72, 0]]], 144).minX, 0);
+  assert.equal(fieldView([[0, [8, 72, Math.PI / 4]]], 144).minX, -24);
+  assert.equal(fieldView([[0, [2, 72, 0]]], 144).minX, -24);
+  assert.equal(fieldView([[0, [72, 140, NaN]]], 144).tiles, 7);
 });
 
 test('field view grows by whole tiles to hold an off-field path and stays square', () => {
   const tile = 144 / 6;
-  const view = fieldView([[0, [0, 0, 0]], [1, [-30, 10, 0]], [2, [20, 160, 0]]], 144);
-  assert.equal(view.minX, -tile);
-  assert.equal(view.tiles, 7);
-  assert.ok(view.minY <= 0 && view.minY + view.span >= 160);
+  const view = fieldView([[0, [10, 10, 0]], [1, [-30, 10, 0]], [2, [20, 160, 0]]], 144);
+  assert.equal(view.minX, -2 * tile);
+  assert.ok(view.minY <= 0 && view.minY + view.span >= 168);
   assert.equal(view.span, view.tiles * tile);
 });
 
@@ -58,6 +60,14 @@ test('plot reduction preserves short spikes, troughs, and invalid-data gaps', ()
   assert.ok(points.length < 500);
 });
 
+test('unit scales past two widen the graph margins alternately left and right', () => {
+  assert.deepEqual(plotMargins(0), [45, 45]);
+  assert.deepEqual(plotMargins(2), [45, 45]);
+  assert.deepEqual(plotMargins(3), [87, 45]);
+  assert.deepEqual(plotMargins(4), [87, 87]);
+  assert.deepEqual(plotMargins(5), [129, 87]);
+});
+
 test('plots retain neighboring samples at zoom boundaries', () => {
   assert.deepEqual(plotPoints([[0, 1], [1, 2], [2, 3], [3, 4]], 1.2, 1.8), [[1, 2], [2, 3]]);
 });
@@ -85,6 +95,52 @@ test('native heading stays radians and loop graphs explicitly convert ns to ms',
   assert.equal(options[3].unit, 'ms');
   assert.deepEqual(scalarSeries([[0, 12000000]], null, options[3].scale), [[0, 12]]);
   assert.deepEqual(scalarSeries([[0, [3, null, NaN]]], 1), [[0, null]]);
+});
+
+test('extremes cover only the window, skip gaps, and keep the earliest tie', () => {
+  const series = [[0, 99], [1, 2], [2, null], [3, 7], [4, -1], [5, 7], [6, -50]];
+  assert.deepEqual(extremes(series, 0.5, 5.5), {min: [4, -1], max: [3, 7]});
+  assert.equal(extremes(series, 2, 2.5), null);
+  assert.equal(extremes([], 0, 1), null);
+});
+
+test('velocity gets a derived speed channel in in/s', () => {
+  const options = channelOptions([{name: 'velocity', type: 'double[]', components: 3}]);
+  const speed = options.find(option => option.key === 'velocity::speed');
+  assert.equal(speed.label, 'velocity / Speed');
+  assert.equal(speed.unit, 'in/s');
+  assert.deepEqual(scalarSeries([[0, [3, -4, 1]], [1, [3, null, 0]]], speed.component), [[0, 5], [1, null]]);
+});
+
+test('drive wheel arrays are labelled by wheel, velocity in ticks/s', () => {
+  const options = channelOptions([
+    {name: 'Drive/motors/power', type: 'double[]', components: 4},
+    {name: 'Drive/motors/velocityTps', type: 'double[]', components: 4},
+  ]);
+  assert.deepEqual(options.slice(0, 4).map(option => option.componentLabel), ['leftFront', 'rightFront', 'leftRear', 'rightRear']);
+  assert.equal(options[0].unit, '');
+  assert.equal(options[5].label, 'Drive/motors/velocityTps / rightFront');
+  assert.equal(options[5].unit, 'ticks/s');
+});
+
+test('traction channels read in in/s, turn in rad/s', () => {
+  const options = channelOptions([
+    {name: 'MaxScope/traction/wheels', type: 'double[]', components: 3},
+    {name: 'MaxScope/traction/mismatchInPerS', type: 'double'},
+  ]);
+  assert.deepEqual(options.slice(0, 3).map(option => [option.componentLabel, option.unit]),
+    [['Forward', 'in/s'], ['Left', 'in/s'], ['Turn', 'rad/s']]);
+  assert.equal(options.find(option => option.name === 'MaxScope/traction/mismatchInPerS').unit, 'in/s');
+});
+
+test('battery and hub channels read in volts and amps', () => {
+  const options = channelOptions([
+    {name: 'MaxScope/battery/restingVolts', type: 'double'},
+    {name: 'MaxScope/battery/currentAmps', type: 'double'},
+    {name: 'hubs/control/volts', type: 'double'},
+    {name: 'hubs/control/currentAmps', type: 'double'},
+  ]);
+  assert.deepEqual(options.map(option => option.unit), ['V', 'A', 'V', 'A']);
 });
 
 test('channel folders retain complete paths, array components, and prefix collisions', () => {
@@ -126,7 +182,7 @@ test('discrete picker includes command state and individual gamepad buttons, not
   assert.equal(options[0].source, 'commands/active');
   assert.equal(options.filter(option => option.name === 'events' || option.name === 'commands/events').length, 0);
   const button = options.find(option => option.key === 'gamepad1/buttons::1');
-  assert.equal(button.componentLabel, 'B');
+  assert.equal(button.componentLabel, 'Circle');
   assert.deepEqual(discreteSeries([[0, 0], [1, 3], [2, null]], button.bit), [[0, false], [1, true], [2, null]]);
   assert.deepEqual(discreteSeries([[0, ''], [1, false], [2, NaN]]), [[0, ''], [1, false], [2, null]]);
   assert.equal(discreteOptions([{name: 'commands/running', type: 'string'}])[0].source, 'commands/running');
@@ -241,4 +297,77 @@ test('sampled active sets become one span per command name', () => {
   ]);
   assert.deepEqual(activeCommandSpans([[0, '#1 Held']], 9), [{name: 'Held', startSec: 0, endSec: 9, outcome: 'SAMPLED'}]);
   assert.deepEqual(activeCommandSpans(), []);
+});
+
+test('graph padding never invents a negative loop time', () => {
+  assert.deepEqual(plotBounds([{axis: 0, visible: true, points: [[0, 0], [1, 50]]}], 0, 1), [0, 56]);
+  assert.deepEqual(plotBounds([{axis: 0, visible: true, points: [[0, -50], [1, 0]]}], 0, 1), [-56, 0]);
+});
+
+test('compared runs line up at op-mode start, first movement, or log start', () => {
+  const events = [{tSec: 0.4, text: 'init X'}, {tSec: 1.2, text: 'start'}];
+  const poses = [[0.5, [NaN, 0, 0]], [1, [10, 10, 0]], [2, [10.5, 10, 0]], [3, [12, 10, 0]]];
+  assert.equal(alignmentAnchor(events, poses, 'start'), 1.2);
+  assert.equal(alignmentAnchor([], poses, 'start'), 0);
+  assert.equal(alignmentAnchor(events, poses, 'motion'), 3);
+  assert.equal(alignmentAnchor(events, poses, 'log'), 0);
+  assert.deepEqual(shiftSeries([[1, 'a'], [2, 'b']], 0.5), [[1.5, 'a'], [2.5, 'b']]);
+});
+
+test('problem stepping and the problems under the cursor', () => {
+  const problems = [{startSec: 2, endSec: 4}, {startSec: 6, endSec: 6}, {startSec: 9, endSec: 9.5}];
+  assert.equal(adjacentProblem(problems, 0, 1), problems[0]);
+  assert.equal(adjacentProblem(problems, 2, 1), problems[1]);
+  assert.equal(adjacentProblem(problems, 6, -1), problems[0]);
+  assert.equal(adjacentProblem(problems, 2, -1), null);
+  assert.deepEqual(problemsAt(problems, 3), [problems[0]]);
+  assert.deepEqual(problemsAt(problems, 6.05), [problems[1]]);
+  assert.deepEqual(problemsAt(problems, 5), []);
+});
+
+test('match clock follows BIOBUZZ milestones and counts down to the end of teleop', () => {
+  const teleop = matchPhases({kind: 'teleop', startSec: 2, autoSec: 30, driverSec: 120, flowerUnlockSec: 60, finalTwentySec: 100});
+  assert.deepEqual(teleop.marks.map(mark => [mark.tSec, mark.label]),
+    [[2, 'start'], [62, 'FLOWER ownership unlocked'], [102, 'Final 20 seconds'], [122, '2:00']]);
+  assert.deepEqual(phaseAt(teleop, 1), {name: 'INIT', clock: ''});
+  assert.deepEqual(phaseAt(teleop, 2), {name: 'TELEOP', clock: '2:00 left'});
+  assert.deepEqual(phaseAt(teleop, 2.5), {name: 'TELEOP', clock: '2:00 left'});
+  assert.deepEqual(phaseAt(teleop, 61.999), {name: 'TELEOP', clock: '1:01 left'});
+  assert.deepEqual(phaseAt(teleop, 62), {name: 'FLOWER OWNERSHIP UNLOCKED', clock: '1:00 left'});
+  assert.deepEqual(phaseAt(teleop, 92), {name: 'FLOWER OWNERSHIP UNLOCKED', clock: '0:30 left'});
+  assert.deepEqual(phaseAt(teleop, 101.999), {name: 'FLOWER OWNERSHIP UNLOCKED', clock: '0:21 left'});
+  assert.deepEqual(phaseAt(teleop, 102), {name: 'FINAL 20 SECONDS', clock: '0:20 left'});
+  assert.deepEqual(phaseAt(teleop, 121.999), {name: 'FINAL 20 SECONDS', clock: '0:01 left'});
+  assert.deepEqual(phaseAt(teleop, 122), {name: 'AFTER MATCH', clock: '+0:00'});
+  assert.deepEqual(phaseAt(teleop, 135), {name: 'AFTER MATCH', clock: '+0:13'});
+});
+
+test('autonomous and unstarted runs have no teleop milestones', () => {
+  const auto = matchPhases({kind: 'auto', startSec: 1, autoSec: 30, driverSec: 120, flowerUnlockSec: 60, finalTwentySec: 100});
+  assert.deepEqual(auto.marks.map(mark => [mark.tSec, mark.label]), [[1, 'start'], [31, '0:30']]);
+  assert.deepEqual(phaseAt(auto, 1), {name: 'AUTO', clock: '0:30 left'});
+  assert.deepEqual(phaseAt(auto, 20), {name: 'AUTO', clock: '0:11 left'});
+  assert.deepEqual(phaseAt(auto, 31), {name: 'AFTER AUTO', clock: '+0:00'});
+  assert.deepEqual(phaseAt(auto, 40), {name: 'AFTER AUTO', clock: '+0:09'});
+  assert.equal(matchPhases({kind: 'teleop', startSec: null}), null);
+  assert.equal(matchPhases(null), null);
+});
+
+test('clicking the field finds every pass near the point and cycles through them', () => {
+  const series = [[0, [0, 0, 0]], [1, [10, 0, 0]], [2, [11, 0, 0]], [3, [30, 0, 0]], [4, [10.5, 0.2, 0]], [5, [NaN, 0, 0]], [6, [9, 0, 0]]];
+  const passes = posePasses(series, [10.4, 0], 2);
+  assert.deepEqual(passes, [{startSec: 1, endSec: 2, atSec: 1}, {startSec: 4, endSec: 4, atSec: 4}, {startSec: 6, endSec: 6, atSec: 6}]);
+  assert.equal(nextPass(passes, 0), passes[0]);
+  assert.equal(nextPass(passes, 1), passes[1]);
+  assert.equal(nextPass(passes, 6), passes[0]);
+  assert.equal(nextPass([], 0), null);
+});
+
+test('a following graph window keeps its length and the cursor two thirds across, within the run', () => {
+  assert.deepEqual(followWindow(100, 9, 300), [94, 103]);
+  assert.deepEqual(followWindow(2, 9, 300), [0, 9]);
+  assert.deepEqual(followWindow(299, 9, 300), [291, 300]);
+  assert.deepEqual(followWindow(5, 9, 6), [0, 6]);
+  assert.deepEqual(followWindow(150, Infinity, 300), [0, 300]);
+  assert.deepEqual(followWindow(0, 10, 0), [0, 0.001]);
 });

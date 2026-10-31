@@ -1,4 +1,4 @@
-package org.firstinspires.ftc.teamcode.core.logging
+package org.firstinspires.ftc.teamcode.core
 
 import com.bylazar.field.FieldManager
 import com.bylazar.field.PanelsField
@@ -8,7 +8,6 @@ import com.pedropathing.math.Vector2D
 import com.qualcomm.robotcore.util.RobotLog
 import kotlin.math.cos
 import kotlin.math.sin
-import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.subsystems.DriveTelemetrySource
 
 /**
@@ -19,17 +18,12 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveTelemetrySource
  * development and matches. Consumes [DriveTelemetrySource], so it never
  * touches Pedro types directly.
  *
- * Redraws are throttled to [redrawIntervalMs] — pushing the field websocket
+ * Redraws are throttled to 10 Hz — pushing the field websocket
  * at loop rate is pure overhead. Drawing must never stop the robot: any
  * failure is counted, and the view disables itself after a few, mirroring
- * the telemetry-flush policy in
- * [org.firstinspires.ftc.teamcode.core.OpModeBase].
+ * the telemetry-flush policy in [OpModeBase].
  */
-class FieldView(
-    redrawIntervalMs: Double = 100.0,
-    private val clock: Clock = Clock.SYSTEM,
-) {
-    private val intervalNs = (redrawIntervalMs * 1_000_000.0).toLong()
+internal class FieldView {
     private var lastDrawNs = Long.MIN_VALUE
     private var failures = 0
 
@@ -40,8 +34,8 @@ class FieldView(
 
     fun draw(drive: DriveTelemetrySource?) {
         if (drive == null || failures >= MAX_FAILURES) return
-        val now = clock.nanos()
-        if (lastDrawNs != Long.MIN_VALUE && now - lastDrawNs < intervalNs) return
+        val now = System.nanoTime()
+        if (lastDrawNs != Long.MIN_VALUE && now - lastDrawNs < REDRAW_INTERVAL_NS) return
         lastDrawNs = now
 
         try {
@@ -93,6 +87,7 @@ class FieldView(
     }
 
     private companion object {
+        const val REDRAW_INTERVAL_NS = 100_000_000L
         const val ROBOT_RADIUS = 9.0
         const val MAX_FAILURES = 5
         const val PATH_SAMPLES = 16

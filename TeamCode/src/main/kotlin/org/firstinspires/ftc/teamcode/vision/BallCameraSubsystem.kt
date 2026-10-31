@@ -2,14 +2,17 @@ package org.firstinspires.ftc.teamcode.vision
 
 import android.graphics.Canvas
 import android.util.Size
+import com.bylazar.configurables.annotations.Configurable
 import com.qualcomm.robotcore.hardware.HardwareMap
 import java.util.concurrent.TimeUnit
 import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName
 import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.ExposureControl
 import org.firstinspires.ftc.robotcore.internal.camera.calibration.CameraCalibration
+import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.HardwareConfigError
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
+import org.firstinspires.ftc.teamcode.core.logging.Events
 import org.firstinspires.ftc.teamcode.core.logging.SettingsChangeLog
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.vision.VisionPortal
@@ -22,6 +25,95 @@ import org.firstinspires.ftc.vision.opencv.ColorSpace
 import org.firstinspires.ftc.vision.opencv.ImageRegion
 import org.opencv.core.Mat
 import org.opencv.core.Scalar
+
+/**
+ * Panels-tunable settings for the USB ball camera. Tentative values from the
+ * September 18, 2026 tuning session. Panels edits last until the OpMode
+ * stops; copy values worth keeping here. The flight log records every live
+ * change (MaxScope shows them).
+ *
+ * Fields marked **init** are built into the SDK's ColorBlobLocatorProcessor
+ * when the OpMode initializes, so Panels can't change them: edit them here and
+ * hot reload. The rest apply on the next robot loop.
+ *
+ * The `mount*` fields record where the lens sits on the robot. Nothing on the
+ * robot uses them: [BallCameraSubsystem] logs them every tick under
+ * `BallCamera/mount/…` so MaxScope can place detections on the field.
+ */
+@Configurable
+object BallCameraConfig {
+    const val COLOR_SPACE_YCRCB = 0
+    const val COLOR_SPACE_HSV = 1
+
+    /** **init** 0 = YCrCb (channels Y, Cr, Cb), 1 = HSV (OpenCV H 0–180, S, V). */
+    @JvmField var colorSpace = COLOR_SPACE_YCRCB
+
+    /** **init** Inclusive threshold per channel of [colorSpace], 0–255 (HSV hue 0–180). */
+    @JvmField var channel0Min = 125
+    @JvmField var channel0Max = 255
+    @JvmField var channel1Min = 130
+    @JvmField var channel1Max = 170
+    @JvmField var channel2Min = 50
+    @JvmField var channel2Max = 110
+
+    /** **init** Search region as fractions of the frame, origin top-left: 0 ≤ left < right ≤ 1, 0 ≤ top < bottom ≤ 1. */
+    @JvmField var roiLeft = 0.0
+    @JvmField var roiTop = 0.0
+    @JvmField var roiRight = 1.0
+    @JvmField var roiBottom = 1.0
+
+    /** **init** Kernel sizes in pixels; 0 disables. */
+    @JvmField var blurKernelPx = 5
+    @JvmField var erodeKernelPx = 3
+    @JvmField var dilateKernelPx = 3
+
+    /** **init** false = erode then dilate (removes speckles); true = dilate then erode (fills holes). */
+    @JvmField var morphClosing = false
+
+    /** **init** Ignore contours nested inside another contour (glare holes inside a ball). */
+    @JvmField var externalContoursOnly = true
+
+    /** **init** Manual exposure keeps the color threshold valid as the lighting changes; false leaves auto exposure on. */
+    @JvmField var exposureManual = true
+    @JvmField var exposureMicros = 6000
+
+    /** Contour-area limits as a percentage of the full frame. */
+    @JvmField var minAreaPercent = 0.05
+    @JvmField var maxAreaPercent = 40.0
+
+    /** 4π·area/perimeter²; 1.0 is a perfect circle, which a traced contour rarely reaches. */
+    @JvmField var minCircularity = 1.0
+
+    /** Long/short side of the minimum-area rectangle; 1.0 is square. */
+    @JvmField var maxAspectRatio = 2.5
+
+    /** Contour area / convex-hull area; low for merged or notched blobs. */
+    @JvmField var minDensity = 0.7
+
+    /** Detections clear when no new frame has arrived for this long. */
+    @JvmField var maxObservationAgeMs = 150.0
+
+    /** Robot Controller live view. Off saves CPU. */
+    @JvmField var previewEnabled = true
+
+    /** Lens centre above the floor, inches. */
+    @JvmField var mountHeightIn = 0.0
+
+    /** Optical axis below horizontal, degrees; positive tilts the camera down. */
+    @JvmField var mountPitchDownDeg = 0.0
+
+    /** Lens position from the robot's pose point (its centre): + toward the robot's front, inches. */
+    @JvmField var mountForwardIn = 0.0
+
+    /** Lens position from the robot's pose point: + toward the robot's left, inches. */
+    @JvmField var mountLeftIn = 0.0
+
+    /** Optical axis from the robot's front, degrees, counterclockwise-positive like Pedro headings. */
+    @JvmField var mountYawDeg = 0.0
+
+    /** True once the mount values above describe the camera as mounted. */
+    @JvmField var mountMeasured = false
+}
 
 /** One blob that passed the filters. Pixels of the full frame, origin top-left; angles NaN without a lens calibration. */
 data class BallSighting(
@@ -38,10 +130,7 @@ data class BallSighting(
     val verticalDeg: Double,
 )
 
-/**
- * The **init** fields of [BallCameraConfig], validated. Built into the processor
- * at init; a change shows up as [BallCameraSubsystem.restartRequired].
- */
+/** The **init** fields of [BallCameraConfig], validated. Built into the processor at init. */
 data class DetectionSetup(
     val hsv: Boolean,
     val min: List<Int>,
@@ -106,13 +195,10 @@ fun blobFilters(frameAreaPx: Double): List<BlobFilter> = with(BallCameraConfig) 
  * filters apply live (the SDK guards its filter list).
  */
 class BallCameraSubsystem(
-    val hardwareName: String = DEFAULT_HARDWARE_NAME,
     private val clock: Clock = Clock.SYSTEM,
-    /** Flight-log event sink, normally `robot::recordEvent`; receives the tuning values in force. */
-    eventSink: (String) -> Unit = {},
 ) : SubsystemBase("BallCamera") {
 
-    private val settingsLog = SettingsChangeLog("ballVision", clock, eventSink)
+    private val settingsLog = SettingsChangeLog("ballVision", clock, Events::record)
     private var portal: VisionPortal? = null
     private var processor: ColorBlobLocatorProcessor? = null
     private val lensProbe = LensProbe()
@@ -139,14 +225,13 @@ class BallCameraSubsystem(
     var frameAgeMs = Double.NaN
         private set
 
-    val restartRequired: Boolean get() = setup != null && setup != DetectionSetup.fromConfig(WIDTH_PX, HEIGHT_PX)
     val cameraState: String get() = portal?.cameraState?.name ?: "NOT_OPENED"
     val libraryReportedFps: Double get() = portal?.fps?.toDouble() ?: Double.NaN
     val lensReport: LensReport get() = lensProbe.report
 
     override fun init(hardwareMap: HardwareMap) {
-        val webcam = hardwareMap.tryGet(WebcamName::class.java, hardwareName)
-            ?: throw HardwareConfigError("Missing Webcam named \"$hardwareName\" in active configuration.")
+        val webcam = hardwareMap.tryGet(WebcamName::class.java, RobotConfig.Vision.BALL_CAMERA)
+            ?: throw HardwareConfigError("Missing Webcam named \"${RobotConfig.Vision.BALL_CAMERA}\" in active configuration.")
         val s = DetectionSetup.fromConfig(WIDTH_PX, HEIGHT_PX)
         setup = s
         val built = ColorBlobLocatorProcessor.Builder()
@@ -266,14 +351,12 @@ class BallCameraSubsystem(
 
     override fun health(): String = when {
         portal == null -> "not opened"
-        restartRequired -> "restart required for ballVision init settings"
         else -> "${cameraState.lowercase()}; ${candidates.size} ball(s)"
     }
 
     override fun logState(log: StateLog) {
         log.put("camera/state", cameraState)
         log.put("camera/libraryReportedFps", libraryReportedFps)
-        log.put("camera/restartRequired", restartRequired)
         log.put("frame/new", newFrame)
         log.put("frame/ageMs", frameAgeMs)
         log.put("frame/widthPx", WIDTH_PX.toLong())
@@ -334,7 +417,6 @@ class BallCameraSubsystem(
     }
 
     companion object {
-        const val DEFAULT_HARDWARE_NAME = "ballCamera"
         const val WIDTH_PX = 640
         const val HEIGHT_PX = 480
     }

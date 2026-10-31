@@ -3,11 +3,12 @@
 Canonical instructions for every AI assistant working in this repository.
 Read this entire file before changing code.
 
-Human documentation has three entry points:
+Human documentation has four entry points:
 
 - `README.md` — setup and repository map
-- `dutchdocs/DEVELOPMENT.md` — student workflows: subsystems, buttons, autos, logging
-- `dutchdocs/OPERATIONS.md` — hardware bring-up, AutoTune, logs, diagnosis, validation
+- `dutchdocs/DEVELOPMENT.md` — student workflows: subsystems, buttons, autos
+- `dutchdocs/OPERATIONS.md` — hardware bring-up, AutoTune, diagnosis, validation
+- `dutchdocs/LOGGING.md` — automatic logs, channel contract, viewers and post-match debugging
 
 ## What this repo is
 
@@ -150,7 +151,7 @@ Semantics verified against the 1.1.1 artifact (`LibraryContractTest` pins them):
 - There are no command names, no running-command registry and no lifecycle
   hooks. The one exception this repo adds is `logged(name, command)`
   (`core/logging/CommandHistory.kt`), a forwarding `Command` that traces its
-  lifecycle into the flight log (see **Command history**).
+  lifecycle into the flight log (see [Logging](dutchdocs/LOGGING.md#command-history)).
 
 **No priorities.** Every command uses Ivy's default priority 0, so the newest
 command for a subsystem replaces the running one. The only exception is
@@ -200,12 +201,19 @@ Verified 3.0.1 behaviour to respect:
 
 Configuration lives in `pedro/Constants.java` in AutoTune's layout
 (`drivetrainConfig`, `localizerConfig`, `foresightConfig`, `create()`).
-`FORESIGHT_TUNED` is true: `foresightConfig` holds AutoTune's Foresight
-output. If it is ever false the follower has no algorithm, manual driving
-works, and path, hold and turn commands throw at start. AutoTune procedures in
-`pedro/procedures/` are copied unmodified from Pedro-Pathing/Quickstart
-b4312385; `pedro/Tuning.java` registers the Mecanum, Pinpoint, Foresight and
-Tests procedures.
+Pedro 3 has no voltage compensation for mecanum, so the drivetrain is
+`pedro/VoltageCompensatedMecanum.java`: every follower power (paths, holds,
+turns; not manual driving) is scaled by `Constants.NOMINAL_VOLTS` / the smoothed Control Hub voltage, and
+the scale is logged as `Drive/voltageScale`. AutoTune's Foresight and Tests
+procedures use it too, so `NOMINAL_VOLTS` is part of the tuning: change it
+only together with a re-tune.
+`foresightConfig` holds this robot's AutoTune output (`FORESIGHT_TUNED` true);
+re-tune after drivetrain, weight, or nominal-voltage changes. With
+`FORESIGHT_TUNED` false the follower has no algorithm, manual driving works,
+and path, hold and turn commands throw at start. AutoTune procedures in
+`pedro/procedures/` are
+copied unmodified from Pedro-Pathing/Quickstart b4312385; `pedro/Tuning.java`
+registers the Mecanum, Pinpoint, Foresight and Tests procedures.
 
 ## Drive commands
 
@@ -216,10 +224,10 @@ interruption cleanup (a cancelled path keeps driving), and `hold` reports
 nothing about arrival.
 
 ```kotlin
-drive.teleopCommand { TeleopInput(fwd, strafe, turn, precision, turnPower, forwardPower) }
+drive.teleopCommand { TeleopInput(fwd, strafe, turn, precision) }
 drive.followCommand(path, holdEnd = false)       // ends when Pedro leaves FOLLOW (parametric end)
 drive.holdCommand(pose, timeoutMs = 2000.0)      // ends on measured arrival, or timeout (bounded wait)
-drive.turnToCommand(radians, timeoutMs = 2000.0) // ends on measured heading; timeout THROWS
+drive.turnToCommand(radians, timeoutMs = 2000.0) // ends on measured heading, or timeout (bounded wait)
 drive.robotCentricFallbackCommand { input }      // localizer-fault policy; the only prioritized command
 drive.pathProgress()                             // latched 0..1 over all segments, for markers
 drive.pose / drive.velocity / drive.atPose(target) / drive.toggleFieldCentric()
@@ -228,7 +236,7 @@ drive.pose / drive.velocity / drive.atPose(target) / drive.toggleFieldCentric()
 - Arrival uses `DriveConfig.holdToleranceInches/Radians`.
 - Teleop input is staged by the command and applied in `writeHardware()`.
   Field-centric rotation uses the measured heading; a non-finite heading is
-  never used. `forwardPower` forces robot-centric for that tick.
+  never used.
 - A mid-path marker is plain Ivy: `deadline(drive.followCommand(path),
   sequential(waitUntil { drive.pathProgress() >= 0.5 }, instant { … }))`.
   It fires once, and is dropped if the path ends or is cancelled first.
@@ -249,25 +257,47 @@ drive.pose / drive.velocity / drive.atPose(target) / drive.toggleFieldCentric()
    they lock at start. A button held through init does not fire at start.
 5. **Register the drive before the localizer** (`registerAfter` enforces it):
    the localizer samples pose history after `Follower.update()`.
-6. **Fault policy.** An `Exception` from bindings or command execution
-   clears Ivy (no end handlers run), calls `onCommandFault()` on **every**
-   subsystem, records `COMMAND FAULT: …` in the WPILOG, and the loop
-   continues with defaults. An autonomous routine is then no longer scheduled
-   and the op-mode stops itself. An `Error` is not contained, wherever it is
-   thrown: Kotlin's `TODO()` throws `NotImplementedError`, so a `TODO()` left
-   in a command or binding **ends the op-mode**, as do exceptions from
-   `periodic()`, `onLoop()` and `writeHardware()`. `OpModeBase` then calls
-   `Robot.stopAfterCrash`: every subsystem is stopped first, `LOOP CRASHED`
-   and the stack trace are recorded, the log closes, and the error is
-   rethrown to the Driver Station. Telemetry and recorder failures are
-   contained. Use `error("…")` (an `IllegalStateException`) for a command
-   that should fail without ending the op-mode.
-7. **Localizer faults.** `LocalizerSubsystem.periodic()` trips on a non-finite
-   pose, a pose frozen while following, or a bad Pinpoint status, and calls
-   `onFault` once. Teleop (`TeleOpBase`) schedules the robot-centric fallback
-   and makes it the default: no follower update, no odometry read, no
-   field-centric rotation, and paths/holds/turns refuse. Auton cancels the
-   routine and stays put.
+6. **Fault policy: keep running.** Only an `Error` or an exception from
+   `onLoop()` ends the op-mode.
+   - An `Exception` from a `logged()` command ends **only that command**:
+     `FAIL` in `commands/events`, `onCommandFault()` on the subsystems it
+     requires, `COMMAND FAULT: <name>: …` in the WPILOG, then its end handler
+     runs as for an interrupt. A parent `sequential` moves on to its next
+     step, so one broken step never ends an auto. Wrap every routine step in
+     `logged()` (the drive factories already are).
+   - An `Exception` that escapes otherwise (a binding, an unlogged command)
+     clears Ivy (no end handlers run), calls `onCommandFault()` on **every**
+     subsystem, and records `COMMAND FAULT: … (commands cleared, subsystems
+     halted)`. Defaults resume; an auto whose routine is gone stops itself.
+   - An `Exception` from one subsystem's `periodic()` or `writeHardware()` is
+     recorded as `SUBSYSTEM FAULT: <name>.<phase>: …` and the other
+     subsystems still run. A failed write also calls that subsystem's
+     `onWriteFault()` (default `onCommandFault()`): the drive zeroes its
+     motors for that tick but keeps following, so a glitch costs one tick,
+     not the path.
+   - Repeating faults are logged once a second. Telemetry and recorder
+     failures are contained.
+   - An `Error` is never contained, and neither is an exception from
+     `onLoop()`. Kotlin's `TODO()` throws `NotImplementedError`, so a
+     `TODO()` left anywhere **ends the op-mode**: `OpModeBase` calls
+     `Robot.stopAfterCrash`, every subsystem is stopped first, `LOOP CRASHED`
+     and the stack trace are recorded, the log closes, and the error is
+     rethrown to the Driver Station. Use `error("…")` (an
+     `IllegalStateException`) for something that should fail without
+     ending the op-mode.
+7. **Localizer faults.** Two latches, each reported once. `fault`: the pose
+   can't be driven on (non-finite, frozen while following, unreadable); calls
+   `onFault` and ends the checks. `statusFault`: the Pinpoint reported a
+   problem but the pose is live (bad status; `FAULT_BAD_READ`, the driver
+   rejecting one sample, only after 5 in a row; start pose never confirmed);
+   calls `onStatusFault` (default `onFault`) and the pose checks go on.
+   Teleop (`TeleOpBase`) treats both the same: it schedules the robot-centric
+   fallback and makes it the default: no follower update, no odometry read,
+   no field-centric rotation, and paths/holds/turns refuse. Auton cancels the
+   routine and stays put on `fault` only; a `statusFault` is logged and the
+   routine keeps driving. Autos are built to keep going: a turn that times
+   out moves on, and a localizer not ready at START gets a second, then the
+   routine runs anyway.
 8. **Fresh localization.** `LocalizerSubsystem.init()` writes `startingPose`
    (default `Pose.zero()`; an autonomous passes its field start pose) to the
    Pinpoint at every INIT. A read that disagrees before one confirms it is a
@@ -289,95 +319,22 @@ Use the Sloth-compatible `com.bylazar.sloth:fullpanels` artifact; plain
 
 Tunables are `@Configurable` objects with plain `@JvmField var`s initialised
 in code (`@JvmField var targetRpm = 3200.0`). Panels edits them live; nothing
-is persisted, so an app restart or Sloth reload restores the code's values and
+is persisted, so an op-mode restart, app restart or Sloth reload restores the code's values and
 the code is the only source of tuning. No `DEFAULT_*` constants, reset
-functions or clamping getters. Vision configs end with
-`val compiledDefaults = SettingsChangeLog.valuesOf(this)` so lab records can
-flag tuned values. `DriveConfig.brakeOnTeleop` is copied into Pedro's `manualBrakeMode` when the
+functions or clamping getters. `DriveConfig.brakeOnTeleop` is copied into Pedro's `manualBrakeMode` when the
 follower is created (next init).
 
 There are no `@Pinned` classes. Don't pin config objects. Ivy's
 static scheduler is reset by every `Robot`, so commands created before a
 reload never run.
 
-## Flight recorder (WPILOG for AdvantageScope)
+## Logging
 
-`FlightRecorder` writes `/sdcard/FIRST/logs/<OpMode>-<timestamp>-<n>.wpilog`
-(30 files kept). Channels (sampled at ≤ 100 Hz unless noted):
-
-| Channel | Type | Meaning |
-|---|---|---|
-| `Field/Robot` | `struct:Pose2d` | Pose in the FTC field frame for AdvantageScope's 2D field: metres about the centre, axes and heading turned by `RobotConfig.Field.FIELD_VIEW_QUARTER_TURNS` (display only) |
-| `pose` | `double[]` | `[x in, y in, heading rad]`, raw Pedro frame |
-| `velocity` | `double[]` | `[vx in/s, vy in/s, omega rad/s]`, field frame |
-| `driveMode` | string | `IDLE`, `TELEOP`, `FOLLOWING`, `HOLDING`, `ROBOT_CENTRIC_FALLBACK` |
-| `follow/translationalErrorIn`, `follow/headingErrorRad` | double | Foresight errors, only while following/holding |
-| `gamepad1/axes`, `gamepad2/axes` | `double[]` | `[lx, ly(+up), rx, ry(+up), lt, rt]` after deadband |
-| `gamepad1/buttons`, `gamepad2/buttons` | int64 | bits: A B X Y LB RB up down left right start back LS RS |
-| `battery` | double | volts |
-| `loop/totalNanos`, `loop/<phase>Nanos`, `loop/windowMax…` | int64 | loop timing and per-window peaks |
-| `<Subsystem>/…` | any | `SubsystemBase.logState` channels |
-| `BallCamera/candidates/…` | `double[]` | every blob that passed the filters in the current frame, largest first: `xPx`, `yPx`, `radiusPx`, `areaPx`, `circularity`, `horizontalDeg`, `verticalDeg` (+ below the axis), and `selectedIndex` (0, or −1 when none) |
-| `BallCamera/mount/…` | double/boolean | `BallCamera.mount*` as recorded: `measured`, `heightIn`, `pitchDownDeg`, `forwardIn`, `leftIn`, `yawDeg` |
-| `Hive/<RED\|BLUE>/…` | mixed | `state` (`AUDIENCE_RAISED`, `FAR_RAISED`, `UNKNOWN`), `stateAssumed`, `tipCount`, and the goal: `visible`, `cell`, `turretBearingDeg`, `robotBearingDeg`, `distanceIn` (horizontal, from the turret axis), `heightIn`, `spreadIn`, `ageMs` (since estimated capture), `tagIds`, `reprojected`; the aim goal: `aimSource` (`VISION`/`ODOMETRY`), `aimTurretBearingDeg`, `aimRobotBearingDeg`; `fieldGoalErrorIn` (vision goal vs `HiveField`) |
-| `Hive/tags/…` | `double[]` | every season tag of the latest processed frame: `id`, `heightIn`, `class` (1 raised, −1 lowered, 0 ambiguous), `deviationIn` (implied goal's distance from its CELL's fused goal) |
-| `Hive/mount/…`, `Hive/settings/raisedMinHeightIn`, `Hive/frames/…` | mixed | `HiveConfig` camera mount and threshold as recorded; frames processed and dropped for want of a turret angle |
-| `events` | string | explicit events with their own timestamps (not sampled); strictly increasing, a same-microsecond event moves 1 µs later |
-| `commands/events` | string | lifecycle records of `logged` commands, own timestamps, strictly increasing (see below) |
-| `commands/active` | string | traced executions open after each record, `#id name` per line, `(suspended)` suffix |
-| `commands/lost` | int64 | records dropped from the bounded queue; 0 at open, rewritten when it grows |
-
-Log values with `logState(log)` (`log.put("name", value)`) and events with
-`robot.recordEvent("text")`. `put` also takes a `DoubleArray` for one row of
-parallel values (a per-frame detection list); its length may change per tick,
-and it is written immediately, so a cached array can be passed again.
-
-### Command history
-
-```kotlin
-fun raise(): Command = logged("Lift raise", Command.build().requiring(this).setDone { atTop })
-drive.followCommand(path, name = "Drive to bar")   // drive factories are already logged
-```
-
-- `logged` returns a `LoggedCommand` that forwards requirements, priority, the
-  three behaviours, return values and exceptions to the wrapped command on
-  every call. Schedule, cancel, bind and compare **the returned instance**;
-  Ivy never sees the inner one. `logged` on a logged command renames it.
-  `SubsystemBase.defaultCommand` takes any `Command` and sets CANCEL on the
-  builder inside a `LoggedCommand`.
-- Records: `START #id name`, `FINISH` (its `done` returned true, not
-  arrival), `INTERRUPT`, `SUSPEND`/`RESUME` (Ivy's SUSPEND behaviour; resume is
-  seen at the next `execute`), `FAIL #id name in <start|execute|done|end>:
-  <Exception>: <message>` with `(from #child)` when a logged parent sees its
-  child's exception, `FAIL #- name …` when a command threw outside a traced
-  run, and `ABORT #id name: command fault | op-mode stop | restarted without an
-  end` for runs Ivy dropped without `end`.
-- Ivy quirks handled: `end` without `start` and a second `end` record nothing;
-  `loop`/`repeat` restarting the same instance is a new id; `Scheduler.reset`
-  skips `end`, so `Robot` closes open runs with ABORT **after** subsystems are
-  halted (fault policy) or stopped (op-mode stop). ABORT never calls command
-  code.
-- `CommandHistory` is static like Ivy's scheduler and reset by every `Robot`.
-  Its open runs (≤ 64) are the truth; each change is timestamped on the robot
-  clock and queued (≤ 512) with the resulting active set, then written by the
-  recorder each loop and at close. Overflow and tracing errors increment
-  `lost` and write `HISTORY INCOMPLETE: N command records lost`; the command
-  itself is unaffected, and its exception is always rethrown unchanged.
-- **Coverage is instrumented commands only.** A logged group does not expose
-  unlogged children. There are no blocked-schedule events and no interruption
-  causes: Ivy's public API does not reveal them. Never describe
-  `commands/events` as a complete command history.
-- Instrumented today: the five drive factories (default names `Drive
-  teleop`, `Drive follow`, `Drive hold`, `Drive turn`, `Drive robot-centric
-  fallback`), TeleOpBase's `Driver sticks`, fallback and `Reset heading`,
-  Localization Test's moves and `Driver takeover`, Example Auto's routine and
-  steps. Instrument new mechanism commands and autonomous steps the same way;
-  don't wrap trivial `instant`s or marker internals.
-
-Failure isolation: an I/O failure disables the recorder for the run; a
-non-I/O exception in one subsystem's `logState` disables that subsystem's
-channels and records why; anything else escaping the recorder closes it. The
-loop keeps running.
+Logging is automatic; see [dutchdocs/LOGGING.md](dutchdocs/LOGGING.md) for
+state logging, WPILOG channels, events, command history, power sampling, viewers
+and post-match debugging. Never rename tool-read channels (exact-name lookups),
+and never remove, bypass or weaken `logged(...)` or its exception handling: it
+implements the fault policy in lifecycle rule 6.
 
 ## Things AI assistants get wrong often
 
@@ -388,15 +345,13 @@ loop keeps running.
 - **Mirroring:** `Alliance.poses()` / `Alliance.mirror`, field length
   `RobotConfig.Field.LENGTH_INCHES` (**141.5**), symmetry
   `RobotConfig.Field.SYMMETRY`. Not `PoseFactory.mirrorX`, which only reflects.
-- **Foresight constants come from AutoTune.** Never invent values or paste the
-  Pedro docs' example ForesightConfig numbers — those are another robot's. The
-  current values are AutoTune output; re-run the procedure after drivetrain or
-  weight changes.
+- **Foresight constants are not tuned.** Never invent values; run AutoTune.
+  The Pedro docs' example ForesightConfig numbers are another robot's.
 - **Only `Field/Robot` is rotated.** Pedro's frame (origin at the corner on
   the audience's left, +X along the audience wall) and the FTC frame
   AdvantageScope draws (origin at the centre, +Y from the red wall to the
   blue wall) differ by a quarter turn whose sign depends on which wall is red
-  that season: `RobotConfig.Field.FIELD_VIEW_QUARTER_TURNS` (+1 for DECODE,
+  that season: `RobotConfig.Field.FIELD_VIEW_QUARTER_TURNS` (+1 for BIOBUZZ,
   −1 when red is on the audience's right). `WpiStruct` applies it to the
   field-view channel and nothing else: `pose`, `Constants.java`, autonomous
   start poses and `Alliance` are Pedro's frame and never change for it. A
@@ -404,6 +359,10 @@ loop keeps running.
 - **Pinpoint offsets map as** Pedro 2 `forwardPodY → xPodOffset`,
   `strafePodX → yPodOffset` (same `setOffsets(x, y)` call).
 - **Subsystem writes in `periodic`.** Don't.
+- **PS5 controllers only.** `GamepadEx` uses PS5 names (Cross, Circle,
+  Square, Triangle, L1/R1, L2/R2 analog, L3/R3, Options, Create, Touchpad).
+  Never write Xbox names (A/B/X/Y, Back/Start). Options+Cross/Circle are the
+  Driver Station's re-bind chords, so driver chords use Create.
 - **VisionPortal processors are single-use.** Build a new processor every
   run. Never let an exception leave `processFrame`.
 - **The ball camera is the SDK's `ColorBlobLocatorProcessor`.** Its color
@@ -418,7 +377,7 @@ loop keeps running.
   CELL is the goal, not a claim that it can take a score. Tags have no field
   poses (the HIVES pivot) and are never used for localization.
 - **The Limelight rotation convention is unverified.** Every use of a tag's
-  orientation goes through `GoalGeometry.tagRotation()`; if the Hive Tag Survey
+  orientation goes through `GoalGeometry.tagRotation()`; if the Vision Test's HIVE survey
   shows four tags of one CELL disagreeing, fix that one function. Raised/lowered
   uses tag position only, so it does not depend on it.
 - **HIVE goal offsets are FIRST's** (SDK 12.0.0 `AprilTagGameDatabase`), in
@@ -435,7 +394,9 @@ Follow `dutchdocs/DEVELOPMENT.md` → *Add a subsystem*: extend `SubsystemBase`,
 hardware in `init` with the SDK's `hardwareMap.get` (set direction, mode and
 zero-power behaviour there), read in `periodic()`, flush in
 `writeHardware()`, expose Ivy command factories that `requiring(this)`, zero
-actuators in `stop()` and `onCommandFault()`, log in `logState`, register in
+actuators in `stop()` and `onCommandFault()`, expose public read-only state
+(automatically logged; override `logState` only for arrays or specific channel
+names), register in
 `configure()`. Every mechanism goes in `subsystems/`.
 There is deliberately no generic mechanism base class.
 
@@ -451,15 +412,16 @@ sensor reads by default.
 Copy `opmodes/skeletons/ExampleAuto.kt` (routine and meaningful steps `logged`,
 drive steps named): RED poses through `alliance.poses()`,
 paths from `Paths`, the routine as Ivy groups of drive commands, `race`
-timeouts, `deadline` markers, start gates (`FORESIGHT_TUNED`,
-`localizer.ready`, schedule accepted), stop when the routine is no longer
+timeouts, `deadline` markers, start gates (`FORESIGHT_TUNED`; up to 1 s for
+`localizer.ready`, then run anyway unless the pose is lost; schedule
+accepted), `onStatusFault = {}`, stop when the routine is no longer
 scheduled. One `@Autonomous` class per alliance and routine; the BLUE copy
 overrides `initialAlliance` only. Start delay on dpad in init, as in the example.
 
 ## Naming op-modes
 
-Currently enabled: Drive Only, Default Auto RED/BLUE, Ball Tracking Test,
-Limelight AprilTag Test, Hive Tag Survey, Duo Shooter Test, Shooter Test.
+Currently enabled: Drive Only, Robot Centric Drive, Default Auto RED/BLUE,
+Just Path RED, Vision Test, Duo Shooter Test, Shooter Test.
 AutoTune is a web page, not a Driver Station op-mode. `opmodes/skeletons/` holds `@Disabled` op-modes; keep them disabled unless the
 user asks.
 
@@ -490,15 +452,6 @@ No team or season prefix. `"Match"` or `"Diagnostics"` groups. Title Case, no
 - **Hot reload** (`make hot`, `./gradlew deploySloth`): ordinary TeamCode
   iteration, including `pedro/Constants.java`.
 
-Logs: `make pull-logs [N]` pulls the newest N (default all 30 the hub keeps);
-`make viewer` opens MaxScope; `python3 tools/logs/analyze_wpilog.py --json`
-emits the JSON bundle (default: newest log under `robot-logs/`). It reports `commandHistoryCoverage`:
-`"all scheduled"` (pre-Ivy logs, `commands/running`), `"none"` (Ivy logs before
-command tracing) or `"instrumented"` (current logs, `logged` commands only,
-with `commandExecutions`, `commandFailures`, `commandActive` and
-`commandHistoryIntact`/`commandHistoryLostRecords`). When a log doesn't determine the cause, give ranked
-hypotheses and the one channel or reproduction that decides it.
-
 ### Post-match debugging (the AI runs this)
 
 When the user is plugged into the hub and reports a match problem, run
@@ -508,12 +461,16 @@ When the user is plugged into the hub and reports a match problem, run
 The auton run is usually the second pulled file. For "what was it doing":
 read `commandFailures`, then the `commandExecutions` overlapping the symptom
 time, then `--channel commands/active,driveMode,pose` around it. State the
-coverage: an absent command may simply be unlogged.
+coverage: an absent command may simply be unlogged. When a log doesn't
+determine the cause, give ranked hypotheses and the one channel or
+reproduction that decides it. Times count from the op-mode start (init is
+negative); see [Logging](dutchdocs/LOGGING.md#post-match-debugging) for the
+bundle's fields and the full workflow.
 
 ## Running the project
 
 ```
 JAVA_HOME="/Users/maximilianreich/Library/Java/JavaVirtualMachines/corretto-17.0.13/Contents/Home" \
   ./gradlew :TeamCode:testDebugUnitTest :TeamCode:assembleDebug
-python3 -m unittest tools/logs/test_analyze_wpilog.py tools/maxscope/test_log_viewer.py
+python3 -m unittest tools/logs/test_analyze_wpilog.py tools/maxscope/test_log_viewer.py tools/maxscope/test_traction.py tools/maxscope/test_battery.py
 ```

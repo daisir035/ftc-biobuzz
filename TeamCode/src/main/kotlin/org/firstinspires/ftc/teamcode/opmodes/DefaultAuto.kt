@@ -9,6 +9,7 @@ import com.pedropathing.ivy.groups.Groups.sequential
 import com.pedropathing.paths.Path
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous
 import org.firstinspires.ftc.teamcode.core.Alliance
+import org.firstinspires.ftc.teamcode.core.GamepadEx.Button
 import org.firstinspires.ftc.teamcode.core.OpModeBase
 import org.firstinspires.ftc.teamcode.core.logging.logged
 import org.firstinspires.ftc.teamcode.core.monotonicWaitMs
@@ -45,17 +46,18 @@ open class DefaultAutoRed : OpModeBase() {
     private val path1End get() = poses.of(70.7572, 21.5438, 180.0)
 
     override fun configure() {
-        val follower = Constants.create(hardwareMap)
+        val follower = Constants.create(hardwareMap) { robot.hubPower.batteryVolts }
         // Drive first, localizer second: pose history is sampled after Follower.update().
         drive = robot.register(MecanumDriveSubsystem(follower))
         localizer = robot.register(
             LocalizerSubsystem(
                 follower,
-                onEvent = robot::recordEvent,
                 isFollowing = drive::isFollowing,
                 // Driving blind is worse than parking: cancel the routine (its
                 // drive command stops the follower) and stay put.
                 onFault = { routine?.let(Scheduler::cancel) },
+                // The pose is still live: keep driving, the event is in the log.
+                onStatusFault = {},
                 // Written to the Pinpoint at INIT, after the reset. Place the robot before INIT.
                 startingPose = start,
             ),
@@ -83,8 +85,8 @@ open class DefaultAutoRed : OpModeBase() {
     )
 
     override fun onInitLoop() {
-        if (driver.dpadRightPressed) startDelaySec = (startDelaySec + 1).coerceAtMost(10)
-        if (driver.dpadLeftPressed) startDelaySec = (startDelaySec - 1).coerceAtLeast(0)
+        if (driver.pressed(Button.DPAD_RIGHT)) startDelaySec = (startDelaySec + 1).coerceAtMost(10)
+        if (driver.pressed(Button.DPAD_LEFT)) startDelaySec = (startDelaySec - 1).coerceAtLeast(0)
         telemetryBag.section("Auto") { put("start delay s", startDelaySec) }
     }
 

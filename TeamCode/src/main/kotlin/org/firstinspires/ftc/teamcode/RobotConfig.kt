@@ -1,7 +1,7 @@
 package org.firstinspires.ftc.teamcode
 
 /**
- * Central list of hardware-map names + wiring-level knobs.
+ * Central list of hardware-map names, wiring-level knobs, and season constants.
  *
  * This file holds the names the robot's active "Configuration" on the
  * Driver Station must use. Everything in [org.firstinspires.ftc.teamcode
@@ -24,6 +24,14 @@ object RobotConfig {
     object Localization {
         /** Hardware-map name of the GoBilda Pinpoint. */
         const val PINPOINT = "pinpoint"
+    }
+
+    object Vision {
+        /** Limelight 3A (an Ethernet Device in the configuration). */
+        const val LIMELIGHT = "limelight"
+
+        /** goBILDA USB ball camera (a Webcam in the configuration). */
+        const val BALL_CAMERA = "ballCamera"
     }
 
     /** Intake motors; add a name when a second motor is fitted. */
@@ -50,6 +58,14 @@ object RobotConfig {
         const val SINGLE_MOTOR = "shoot"
     }
 
+    /** BIOBUZZ period lengths and milestones measured from teleop start. */
+    object Match {
+        const val AUTO_NANOS = 30_000_000_000L
+        const val DRIVER_NANOS = 120_000_000_000L
+        const val FLOWER_UNLOCK_NANOS = 60_000_000_000L
+        const val FINAL_TWENTY_NANOS = 100_000_000_000L
+    }
+
     /** Game-level constants that change every season. Edit when the new game launches. */
     object Field {
         /** Distance from one end of the field to the other along the x-axis, in inches. */
@@ -74,10 +90,13 @@ object RobotConfig {
          * really is. Pedro: (0, 0) at the corner on the audience's left, +X
          * along the audience wall, +Y away from the audience. FTC: origin at
          * the centre, +Y from the red wall to the blue wall. So this is +1 when
-         * the red wall is on the audience's left (DECODE 2025-26, where +X
-         * points at the audience) and −1 when it is on the right (the usual
-         * layout). Display only: paths, start poses and `Alliance` stay in
-         * Pedro's frame. Verify with the axis check in dutchdocs/OPERATIONS.md.
+         * the red wall is on the audience's left (FTC +X then points at the
+         * audience) and −1 when it is on the right (the usual layout).
+         *
+         * BIOBUZZ is +1: the red ALLIANCE AREA is on the left wall (Pedro
+         * x = 0) as seen from the audience (manual Figure 9-17). Display only:
+         * paths, start poses and `Alliance` stay in Pedro's frame. Verify with
+         * the axis check in dutchdocs/OPERATIONS.md.
          */
         const val FIELD_VIEW_QUARTER_TURNS = 1
     }

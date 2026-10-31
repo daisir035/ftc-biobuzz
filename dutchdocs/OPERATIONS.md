@@ -1,6 +1,6 @@
 # Robot Operations
 
-Physical bring-up, Pedro calibration with AutoTune, logs, and diagnosis for
+Physical bring-up, Pedro calibration with AutoTune and diagnosis for
 this robot. Host tests prove the code agrees with itself and with the Ivy and
 Pedro artifacts; none of it proves the robot drives. The **physical validation
 checklist** at the end lists what still has to be checked on hardware.
@@ -14,7 +14,9 @@ steps in order, **robot on blocks until step 4.**
 existing motor names and directions, and AutoTune's Foresight output
 (`FORESIGHT_TUNED = true`). If Foresight tuning is ever missing
 (`FORESIGHT_TUNED = false`), manual driving works and every path, hold and
-turn command refuses to start.
+turn command refuses to start. The preserved Foresight values predate voltage
+compensation: re-run Foresight with `NOMINAL_VOLTS = 12.0` before relying on
+pathing after the 2026-10-25 upstream sync.
 
 ## 1. Configuration names
 
@@ -44,8 +46,8 @@ turn each wheel robot-forward. Fix directions in `pedro/Constants.java`
 ## 4. Teleop signs and field-centric (on carpet, slow)
 
 In **Drive Only** at low stick: forward/back, strafe left/right, turn
-direction. Toggle field-centric (Back+B), rotate the robot, confirm
-translation stays field-true; reset heading (Back+Y) and confirm "away from
+direction. Toggle field-centric (Create+Circle), rotate the robot, confirm
+translation stays field-true; reset heading (Create+Triangle) and confirm "away from
 the driver" is +x.
 
 **Second-run heading drill.** Every op-mode starts at (0, 0, 0), so teleop's
@@ -55,10 +57,10 @@ field-centric "forward" is wherever the robot faces at INIT.
 2. Without power-cycling, face the robot away from the driver again and init
    Drive Only. Before START the pose must read (0, 0, 0), not the first run's
    pose, and Health must show `Localizer: ok`.
-3. Start: stick forward drives away from the driver with no Back+Y.
+3. Start: stick forward drives away from the driver with no Create+Triangle.
 4. Repeat with an autonomous before teleop: teleop still starts at (0, 0, 0),
    regardless of where the autonomous ended. Face the robot away from the
-   driver before INIT, or press Back+Y after START.
+   driver before INIT, or press Create+Triangle after START.
 
 ## 5. AutoTune (clear carpet, full battery)
 
@@ -75,14 +77,16 @@ With the robot connected, open **http://192.168.43.1:10158**. Procedures
    follower. Line before Curve.
 
 Only values pasted into `pedro/Constants.java` persist. Record the date and
-chassis in a comment next to pasted values. Pedro 3 has no voltage
-compensation; tune on a full battery.
+chassis in a comment next to pasted values. Foresight and Tests drive through
+`VoltageCompensatedMecanum`, which scales every follower power by
+`NOMINAL_VOLTS` / battery volts, so the tuning holds on any battery; keep
+`NOMINAL_VOLTS` at 12.0 when tuning and don't change it afterwards.
 
 ## 6. First framework path (capped speed)
 
 Re-enable `opmodes/skeletons/LocalizationTestTeleOp.kt` (and add
 `@Configurable` back to the class to tune its targets in Panels). From a clear origin:
-Y follows 24" forward, A returns; speed is capped at 30% of max velocity
+Triangle follows 24" forward, Cross returns; speed is capped at 30% of max velocity
 (`pathSpeedFraction`). Press the button again or move a stick to cancel.
 Pressing a button within 0.25 in of its target does nothing; with
 `turnToTargetHeading` the robot turns to the target heading instead.
@@ -96,26 +100,32 @@ error is following or battery.
   must stop, and sticks must drive robot-centric (`driveMode`
   `ROBOT_CENTRIC_FALLBACK`) with forward, strafe, turn, precision and release
   all correct. Paths and field-centric stay unavailable until a new run. In
-  autonomous the routine must cancel and the robot stay put. An exception
-  from the I²C read itself ends the op-mode (hardware stopped first).
-- **Command fault:** in a throwaway teleop, bind a button to a command whose
-  `setExecute` throws. Health shows `command faults`, every mechanism stops
-  for a tick, the drive default resumes, and the log carries `COMMAND FAULT`.
+  autonomous the pod fault is only logged (`LOCALIZER FAULT (pose still
+  live)`) and the routine keeps driving; only a non-finite or frozen pose
+  cancels it and leaves the robot parked. An exception
+  from the I²C read itself is a `SUBSYSTEM FAULT` on the drive: the motors
+  get zero power each tick the read fails, and the path resumes when it
+  works again.
+- **Command fault:** in a throwaway teleop, bind a button to a `logged()`
+  command on the intake whose `setExecute` throws. Health shows `command
+  faults`, only the intake stops, driving carries on, and the log carries
+  `COMMAND FAULT: <name>: …`.
   Repeat with a command whose `setExecute` calls `TODO()`: the op-mode must
   end with every motor stopped, the Driver Station must show
   `NotImplementedError`, and the log must end with `LOOP CRASHED` and `stop`.
 
 ## 8. Vision diagnostics (stationary, no motors)
 
-Three Diagnostics OpModes bring up the season's cameras. None commands a
-motor or applies a pose correction; only Hive Tag Survey infers HIVE state.
-All run their cameras during INIT; gamepad buttons work only after START.
+One Diagnostics OpMode, **Vision Test**, brings up the season's cameras. It
+commands no motor and applies no pose correction. It opens every camera in the
+active configuration, runs them during INIT, and shows one page at a time:
+gamepad 1 **dpad left/right** changes page, in INIT too.
 
-| OpMode | Camera | Purpose |
+| Page | Camera | Purpose |
 |---|---|---|
-| **Limelight AprilTag Test** | Limelight 3A `limelight` | Every HIVE tag: ID, BIOBUZZ meaning, camera-relative measurements, freshness |
-| **Hive Tag Survey** | Limelight 3A `limelight` on a tripod | Every tag's height and implied goal, each CELL's fused goal, each HIVE's state |
-| **Ball Tracking Test** | goBILDA 3122-0004-0001 `ballCamera` | Yellow POLLEN color/shape detection, Panels tuning, RC preview |
+| **Ball camera** | goBILDA 3122-0004-0001 `ballCamera` | Yellow POLLEN color/shape detection, Panels tuning, RC preview |
+| **Limelight tags** | Limelight 3A `limelight` | Every HIVE tag: ID, BIOBUZZ meaning, camera-relative measurements, freshness |
+| **HIVE survey** | Limelight 3A `limelight` on a tripod | Every tag's height and implied goal, each CELL's fused goal, each HIVE's state (the only page that infers HIVE state) |
 
 ### Hardware and configuration
 
@@ -128,7 +138,7 @@ All run their cameras during INIT; gamepad buttons work only after START.
 3. Save and activate the configuration. **Full APK install** — the lens
    calibration lives in `res/xml/teamwebcamcalibrations.xml`, which a Sloth hot
    reload does not deploy.
-4. Verify the calibration matched: Ball Tracking Test → *Ball Camera → lens
+4. Verify the calibration matched: Vision Test, ball camera page → *Ball Camera → lens
    calibration* must read `exact 640x480 entry`. `none …` means the camera's
    USB IDs differ from goBILDA's published `VID 0xC45, PID 0x366`; read the
    real ones and fix the `<Camera vid pid>` entry:
@@ -163,8 +173,7 @@ has not been verified here. Use **pipeline 0** (`visionDiagnostics.limelightTagP
 | Advanced | Full 3D | **On** — required for camera-space pose |
 | Advanced | Camera pose in robot space / field map | Leave unset; the robot code places tags itself from `HiveConfig`, and the HIVES pivot |
 
-Download the pipeline file from the web interface after tuning and commit it
-next to the lab record.
+Download the pipeline file from the web interface after tuning and commit it.
 
 Units reported: `tx`/`ty` degrees from the crosshair, as the Limelight reports
 them (tx positive right; Limelight's JSON spec says ty positive down — confirm
@@ -179,8 +188,8 @@ age and still excludes USB transport and the wait before the first poll.
 Without a device `ts`, identity falls back to receipt timestamps, so duplicates
 across polls cannot be distinguished.
 
-Tags identify a CELL. The AprilTag Test does not say which CELL faces up;
-Hive Tag Survey infers that from measured tag heights. A raised CELL is the
+Tags identify a CELL. The tag page does not say which CELL faces up; the
+HIVE survey page infers that from measured tag heights. A raised CELL is the
 goal, not a promise that it can take a score.
 
 ### Panels and the camera preview
@@ -188,39 +197,33 @@ goal, not a promise that it can take a score.
 - **Panels:** robot powered, laptop on the Control Hub Wi-Fi,
   `http://192.168.43.1:8001`. Configurables `BallCameraConfig` and
   `HiveConfig`; the same telemetry sections as the Driver Station.
-  `VisionDiagnosticsConfig` is deliberately not in Panels: change its defaults
+  `VisionTestConfig` is deliberately not in Panels: change its defaults
   in code. Panels does not stream camera images.
-- **Preview:** on the **Robot Controller** screen while either OpMode has the
+- **Preview:** on the **Robot Controller** screen while Vision Test has the
   ball camera open (INIT or running): plug an HDMI monitor into the Control
   Hub, or `tools/hub-connect.sh` then `scrcpy`. The SDK's ColorBlobLocatorProcessor
-  outlines every blob that passed the filters. After START, gamepad 1 **B**
-  toggles rendering (`previewEnabled`); off saves CPU for timing comparisons.
+  outlines every blob that passed the filters. On the ball camera page, gamepad 1
+  **Circle** toggles rendering (`previewEnabled`); off saves CPU for timing comparisons.
 
 ### What applies live
 
-| Live (next robot loop) | Stop and re-init the OpMode |
+| Live in Panels (next robot loop) | In code, then `make hot` and re-init |
 |---|---|
-| Area/circularity/aspect/density filters, max observation age, preview | Color space and channel thresholds, ROI, blur/erode/dilate, contour mode, exposure, everything in `visionDiagnostics` |
+| Area/circularity/aspect/density filters, max observation age, preview | Color space and channel thresholds, ROI, blur/erode/dilate, contour mode, exposure, everything in `VisionTestConfig` |
 
-The SDK builds the color range, region and morphology into the processor, so
-those apply at the next init; no redeploy is needed. A pending change shows a
-**RESTART REQUIRED** section. The capture resolution is fixed at 640×480 MJPEG.
-
-**Tuning in the flight log.** Both OpModes write the `visionDiagnostics`
-values as an event at init. The ball camera writes every `ballVision` value
-at init, then an event naming only the fields that changed (at most one per
-second; slider drags are merged). An edit in the last second before stop can
-be missing from the log; a lab record still has it.
+The SDK builds the color range, region and morphology into the processor at
+init, and Panels edits are gone by the next init, so those are changed in
+code. The capture resolution is fixed at 640×480 MJPEG.
 
 **Camera mount.** The `ballVision.mount*` fields record where the lens sits:
 `mountHeightIn` above the floor, `mountPitchDownDeg` below horizontal,
 `mountForwardIn`/`mountLeftIn` from the robot's pose point, `mountYawDeg` from
 its front, and `mountMeasured` once the numbers are real. Nothing on the robot
-uses them; they are logged every tick so MaxScope can place detections on the
-field. Re-measure after moving the camera.
+uses them. Re-measure after moving the camera; see [Logging](LOGGING.md)
+for recorded mount values and field playback.
 
-**Panels edits are not saved.** They last until the app restarts or a hot
-reload. Save a lab record before either; it lists every value you changed.
+**Panels edits are not saved.** They last until the op-mode stops. Copy
+values worth keeping into the config object before then.
 
 **Frame age.** The SDK processor publishes no capture timestamp, so *frame
 age* is robot-clock time since the latest new frame reached the loop.
@@ -228,36 +231,35 @@ Detections clear when it passes `maxObservationAgeMs`.
 
 ### Lab procedure
 
-Robot stationary, on blocks. Save a lab record (gamepad 1 **A** after START)
-after each step that settles something.
+Robot stationary, on blocks. Note the values after each step that settles
+something.
 
 1. **Exposure.** One POLLEN ball ~1 m away. With `exposureManual` true, lower
-   `exposureMicros` until a rolled ball is not smeared; re-init after each
-   change. *Ball Camera → exposure* shows what the camera accepted.
-2. **Color range.** Adjust `channel*Min/Max`, re-init, and check the preview
+   `exposureMicros` in code until a rolled ball is not smeared; `make hot` and
+   re-init after each change. *Ball Camera → exposure* shows what the camera accepted.
+2. **Color range.** Adjust `channel*Min/Max` in code, `make hot`, re-init, and check the preview
    until the ball is outlined and tiles, walls, and red/blue NECTAR are not —
    near, far, in shadow, under the brightest light.
-3. **Region and blob filters.** Set the ROI to where POLLEN can appear
-   (re-init). Then, live: raise `minAreaPercent` just below the farthest useful
+3. **Region and blob filters.** Set the ROI to where POLLEN can appear (in
+   code, `make hot`). Then, live in Panels: raise `minAreaPercent` just below the farthest useful
    ball's area and tighten `minCircularity` (1.0 is a perfect circle, which a
    traced contour rarely reaches), `maxAspectRatio`, `minDensity` while testing
    two touching balls, a half-hidden ball, and a ball at the frame edge.
 4. **Moving and multiple balls.** Roll a ball across the frame: frame age stays
    small and the target never lingers after the ball leaves. With several
    balls, the target is the largest. Cover the lens: the target goes to none.
-5. **Both cameras.** Set `VisionDiagnosticsConfig.runBothCameras` true in
-   Panels and restart **each** OpMode. Compare
-   *Timing Comparison*, library fps, Limelight new-frame rate and ages against
-   the single-camera runs, then open the run in MaxScope (`make viewer`) for loop percentiles.
-6. **Limelight tags.** Limelight AprilTag Test: hold each tag still; confirm ID
+5. **Both cameras.** Vision Test opens both cameras when both are configured.
+   Run it once like that and once with `VisionTestConfig.openLimelight` false
+   (in code, `make hot`). Compare *Timing*, library fps, Limelight new-frame
+   rate and ages, then compare loop percentiles using the
+   [logging workflow](LOGGING.md#review-a-wpilog-in-maxscope).
+6. **Limelight tags.** Vision Test, tag page: hold each tag still; confirm ID
    and meaning against its sticker, the signs of tx/ty, and |d| against a tape
    measure; record whether the cluster's four tags appear together.
 
-Then `adb pull /sdcard/FIRST/lab-records/. lab-records/`, fill in the header, and commit the record.
-Adopt tuned values by setting the fields listed under
-**[adopt into the code]** in their config objects.
+Then copy the values tuned live in Panels into `BallCameraConfig` and commit.
 
-### Hive Tag Survey (real CELL and field)
+### HIVE survey (real CELL and field)
 
 Each HIVE is one alliance's. It sits tipped 30° with one CELL raised (the
 goal) and the other lowered, and a tip swaps them. Each CELL's four tags are on
@@ -276,10 +278,9 @@ Setup:
    `cameraForwardIn`/`cameraLeftIn`/`axisForwardIn`/`axisLeftIn` 0 (the tripod
    point is the reference). Set `mountMeasured` true. The turret angle is held
    at 0.
-3. Open **Hive Tag Survey**; *Survey Setup* must read `measured`.
+3. Open **Vision Test** and go to the HIVE survey page; *Survey Setup* must read `measured`.
 
-Procedure (save a lab record with **A** after START once each step settles; **B**
-clears the survey memory):
+Procedure (**Circle** clears the survey memory):
 
 1. **One CELL head-on.** Aim at your raised CELL from 1.5–2.5 m. *CELL Goals*
    spread under ~1 in with all four tags used. A consistent spread that grows
@@ -300,7 +301,7 @@ clears the survey memory):
    audience CELL raised, BLUE far CELL raised (`HiveState.matchSetup`, the
    autonomous prior). If not, fix `matchSetup`.
 5. **Every tag.** Walk the tripod round so all 16 tags appear in *Tags
-   (latest)*; save a record. `adb pull /sdcard/FIRST/lab-records/. lab-records/` and commit it.
+   (latest)*; note any that disagree.
 
 Robot use: `HiveTracker` (registered after the Limelight) with the turret's
 measured-angle lookup as `turretAngleAt`, `HiveTracker.MATCH_SETUP` priors in
@@ -336,152 +337,11 @@ validity gates as `LimelightSubsystem`; controller updates driven by
 `BallCameraSubsystem.newFrame`, with the output held between frames; an explicit lost-target timeout; a
 latency budget from the measurements above; and on-blocks tests before carpet.
 
-## Logs and post-run diagnosis
+## Logging
 
-Every op-mode writes a WPILOG under `/sdcard/FIRST/logs` (newest 30 kept).
-Continuous channels are sampled at ≤ 100 Hz; `events` keeps each event's own
-timestamp (an event in the same microsecond as the one before moves 1 µs later
-so AdvantageScope shows both); per-window loop maxima keep spikes between
-samples.
-
-```sh
-make pull-logs 2   # pull the newest match (Auto + TeleOp)
-make pull-logs     # pull all 30 logs the hub keeps
-make viewer        # summarize and plot them in MaxScope
-```
-
-For an auton problem inspect `robot-logs/Auto-*.wpilog` explicitly; the
-default target is usually the newer TeleOp log.
-
-**Command history covers `logged` commands only.** `commands/events` has a
-timestamped record for every start, finish, interruption, suspension, failure
-and abort of a traced command, each run with its own `#id`; `commands/active`
-shows which traced commands were running at any moment; `commands/lost` above
-0 means records were dropped. Traced today: all drive commands (driver sticks,
-takeovers, paths, holds, turns, the robot-centric fallback), Reset heading,
-Localization Test moves and Example Auto's steps. Untraced commands, and
-untraced children of a traced group, do not appear; FINISH is not arrival;
-interruption causes and rejected schedules are not recorded. The analyzer
-prints `command history: instrumented commands only` with every execution.
-Logs from the Ivy migration until tracing print `not recorded`; logs from
-before September 2026 show their complete command sets (`commands/running`).
-Explicit events (`AUTO: …`, `COMMAND FAULT: …`, `LOCALIZER FAULT: …`,
-`LOOP CRASHED: …`) are still in `events`.
-A loop crash's stack trace is in `events`.
-
-### Watching the robot on AdvantageScope's 2D field
-
-Drag **`Field/Robot`** onto the 2D Field tab and pick an FTC field; its default
-coordinate system (**Center/Rotated**) is the one the channel is written for.
-`Field/Robot` is a WPILib `Pose2d` struct in the FTC field frame: metres about
-the field centre, rotated from Pedro's axes by
-`RobotConfig.Field.FIELD_VIEW_QUARTER_TURNS`. Graph `pose` (raw Pedro inches)
-when comparing against `Constants.java`; never put `pose` on the field, where
-its inches are read as metres.
-
-**Which way is which.** Pedro's frame is fixed by the audience: (0, 0) is the
-corner on the audience's left, +X runs right along the audience wall, +Y runs
-away from the audience. The FTC frame is fixed by the red wall: +Y points from
-the red wall to the blue wall, and AdvantageScope draws it with the audience
-at the bottom of the screen. In DECODE the red wall is on the audience's left
-(the alliances are swapped from the usual layout), so the two frames differ by
-one quarter turn counter-clockwise and the constant is `1`. With the usual
-layout (red on the right) it is `-1`. Set it when the game launches, next to
-`SYMMETRY`. On screen a DECODE log shows Pedro (0, 0) at the bottom-left
-corner and heading 0 pointing right; before this rotation existed the robot
-drew at the top-left facing down.
-
-**Verify the axes once on a real field.** Park the robot in Pedro's origin
-corner (audience side, red side in DECODE) facing along the audience wall,
-start a teleop, drive one tile forward. The drawn robot must sit in the
-bottom-left corner pointing right and move right. A quarter-turn error means
-`FIELD_VIEW_QUARTER_TURNS` is wrong for this field; anything else is the
-localizer. The rotation is display only — autonomous start poses, paths and
-`Alliance` stay in Pedro's frame and need no change when it changes.
-
-### Flight recorder validation
-
-Three separate levels; passing one says nothing about the next.
-
-1. **Decoder (host, automated).** `FlightRecorderDriveIntegrationTest` runs
-   teleop, a path, a driver takeover, a command fault, an explicit event, pose
-   and heading changes and shutdown through the real `Robot`, Ivy and Pedro
-   drive, decodes the WPILOG, and checks every `Field/Robot` sample against
-   `((x − 72) · 0.0254, (y − 72) · 0.0254, heading)` of its `pose` sample, the
-   last sample against the last real pose, event order and the channel set,
-   and the command history of that session: exact `commands/events` order and
-   ids, strictly increasing timestamps aligned with `driveMode` and the
-   `COMMAND FAULT` event, the active set during the nested route and the
-   takeover, and nothing active or lost at the end. `CommandHistoryTest` covers
-   the Ivy lifecycle cases (cancel before start, deadline double end, suspend,
-   repeat, identical names, faults, stop, bounded loss, recorder failure).
-   To keep that log, run the test with an output directory outside the repo
-   (`--rerun`, because Gradle does not see the variable change):
-
-   ```sh
-   WPILOG_SAMPLE_DIR=../biobuzz-command-history-validation ./gradlew :TeamCode:testDebugUnitTest \
-     --tests '*FlightRecorderDriveIntegrationTest' --rerun
-   python3 tools/logs/analyze_wpilog.py ../biobuzz-command-history-validation/IntegrationSample.wpilog
-   ```
-2. **AdvantageScope GUI (manual).** Open `IntegrationSample.wpilog` in
-   AdvantageScope (File → Open Log). Expected:
-   - The sidebar lists `Field/Robot` with `translation`/`rotation` children,
-     `pose`, `driveMode`, `events`, `follow/*`, `gamepad1/*`, `loop/*`,
-     `Drive/*`, `Localizer/*`.
-   - Add a **2D Field** tab, pick an FTC field, keep **Center/Rotated**, and
-     drag `Field/Robot` on. Scrub the timeline (values are the FTC frame,
-     DECODE quarter turn applied): the robot starts at (0.41, −1.63) m
-     facing 90° (Pedro (8, 56) in), near the left wall below the centre
-     line with the arrow pointing right; moves to (0.38, −1.32) m; turns to
-     120° at (0.56, −1.07) m; and ends at (0.81, 0.46) m facing 180°
-     (Pedro (90, 40) in). It does not jump to the field centre at the end.
-   - A **Line Graph** of `driveMode` and the `events` list show TELEOP →
-     FOLLOWING → TELEOP → IDLE → TELEOP and the four events `init
-     IntegrationTest`, `COMMAND FAULT: …`, `marker`, `stop` in that order.
-   - Add a **Table** tab with `commands/events`, `commands/active` and
-     `driveMode`. Fourteen `commands/events` rows, none missing: `START #1
-     Driver sticks` at 0.010 s; `INTERRUPT #1`, `START #2 Route`, `START #3
-     Follow line` at 0.040 s (the first FOLLOWING row); `INTERRUPT #3`,
-     `INTERRUPT #2 Route`, `START #4 Driver takeover` at 0.080 s; `INTERRUPT
-     #4`, `START #5 Driver sticks` at 0.090 s; `INTERRUPT #5`, `START #6
-     Faulty step`, `FAIL #6 Faulty step in execute: IllegalStateException:
-     boom` at 0.100 s (with `COMMAND FAULT` in `events`); `START #7 Driver
-     sticks` at 0.110 s; `ABORT #7 Driver sticks: op-mode stop` at 0.120 s.
-     `commands/active` reads `#2 Route` / `#3 Follow line` while following,
-     `#4 Driver takeover` during the takeover, and is empty at the end;
-     `commands/lost` is 0.
-3. **Hardware (manual).** Park the robot at a known field pose, init an
-   op-mode, drive one tile forward and turn 90°, stop, pull the log, and
-   confirm the 2D field shows the same start, direction and end (see "Verify
-   the axes" above). In Localization Test, press Y, move a stick mid-path, and
-   confirm `commands/events` shows `START … Localization test path`, then
-   `INTERRUPT` of it with `START … Driver takeover` at the moment the sticks
-   moved, and `Driver sticks` resuming after release.
-
-### Symptom triage
-
-| Symptom | First evidence to check |
-|---|---|
-| Op-mode stopped | Driver Station exception, `LOOP CRASHED` event, loop phase maxima, minimum battery |
-| All mechanisms twitched off / auto stopped mid-routine | `COMMAND FAULT` event and Health `command faults`; the `FAIL` record in `commands/events` names the traced command and phase |
-| Auto did the wrong step / stopped early | `commands/events` and `commands/active` around the moment (only `logged` steps appear); FINISH of a hold may be its timeout |
-| Path "finished" short of the target | `follow/translationalErrorIn` at the end; follow ends at the parametric end, add `holdCommand` |
-| Auton wrong only on BLUE | Headings not through `Alliance.mirror`, or `PoseFactory.mirrorX` used (it reflects; this season rotates) |
-| Paths refuse to start | `FORESIGHT_TUNED` false, or `ROBOT_CENTRIC_FALLBACK` after a localizer fault |
-| Auton drifted | `follow/translationalErrorIn`: small error means localization; large means following |
-| Sudden pose jump | `pose correction applied` events and correction gates |
-| Field-centric wrong | Robot faced elsewhere at INIT (heading starts at 0): Back+Y |
-| Driving robot-centric unexpectedly | `LOCALIZER FAULT` event, `Drive/odometryFallback` |
-| Loop rate collapsed | Phase maxima: `writeHardware` usually Pinpoint, `telemetry` Panels, `periodic` season I/O |
-| Tuned config reverted | Registration, public primitive `@JvmField`, config schema |
-| Pinpoint unhealthy | Init Health status (`waiting for start pose` = pose write not landing), I²C cable, robot still at power-up (IMU calibration) |
-| Ball target flickers or lingers | `BallCamera/frame/ageMs`, `rate/processedFps`, `target/status`, `candidates/accepted` |
-| Tag diagnostic shows nothing | Limelight health (pipeline index/type), `Limelight/fiducial/count`, Full 3D and marker size |
-| HIVE goal missing or on the wrong CELL | `Hive/<ALLIANCE>/state`, `Hive/tags/heightIn` and `tags/class` against `settings/raisedMinHeightIn`, `mount/*`, `frames/withoutTurretAngle` |
-| HIVE goal spread large | `Hive/tags/deviationIn` per tag: one tag far off is an outlier; all off together is the mount or rotation convention |
-
-- Repeated `LOOP OVERRUN` events matter; one at init/stop is usually warm-up.
-- Swap a battery below 12.0 V resting. Normal operation should not sag below ~10 V.
+Logging is automatic; see [dutchdocs/LOGGING.md](LOGGING.md) for WPILOG channels,
+settings and power samples, MaxScope, pulling logs, diagnosis and recorder
+validation (including the hardware recording checklist).
 
 ## Physical validation checklist
 
@@ -489,12 +349,13 @@ Everything below is unverified on hardware after the Ivy / Pedro 3 migration.
 Record results in `PROGRESS.md`.
 
 **Install and reload**
-- [ ] Full APK install succeeds; Driver Station shows Drive Only, Ball Tracking
-      Test, Limelight AprilTag Test, Hive Tag Survey (no Pedro Tuning op-mode).
+- [ ] Full APK install succeeds; Driver Station shows Drive Only, Robot Centric
+      Drive, Default Auto RED/BLUE, Just Path RED, Vision Test, Duo Shooter Test,
+      Shooter Test (no Pedro Tuning op-mode).
 - [ ] AutoTune page loads at `http://192.168.43.1:10158` and lists Mecanum
       Tuner, Pinpoint Tuner, Foresight Tuner and Tests (Sloth 0.2.4 runtime).
-- [ ] Panels loads at `:8001`; a `DriveConfig` edit applies live and survives
-      an op-mode restart and a power cycle.
+- [ ] Panels loads at `:8001`; a `DriveConfig` edit applies live and goes back
+      to the code's value when the op-mode restarts.
 - [ ] `make hot` after a small TeamCode edit: change takes effect, Panels still
       edits the reloaded values, AutoTune still lists procedures.
 - [ ] Run Drive Only, stop, run it again three times, then an autonomous and a
@@ -506,18 +367,19 @@ Record results in `PROGRESS.md`.
       (xPodOffset ≈ 1.4569 in, yPodOffset ≈ −0.9437 in, X REVERSED, Y FORWARD —
       X direction confirmed by the push test; the Tuner's FORWARD read the X
       pod with the wrong sign on this robot).
-- [ ] Foresight Tuner completes; output pasted; `FORESIGHT_TUNED = true`.
-      No path, hold or turn is run on the robot before this.
+- [ ] Re-run Foresight through voltage compensation with `NOMINAL_VOLTS = 12.0`;
+      paste the output and keep `FORESIGHT_TUNED = true`. The preserved values
+      predate compensation and must not be treated as validated with it.
 - [ ] Tests → Hold resists pushing; Line and Curve repeat without drift.
 - [ ] A `Paths.line(a, b).linear(a, b)` path (Example Auto's
       return leg) starts at a's heading and ends at b's, on RED and BLUE.
 
 **Driving and turning**
 - [ ] Stick signs, precision trigger, squared input curve, diagonal speed.
-- [ ] Field-centric stays field-true through a full rotation; Back+Y resets heading.
+- [ ] Field-centric stays field-true through a full rotation; Create+Triangle resets heading.
 - [ ] Brake mode on stick release matches `DriveConfig.brakeOnTeleop`.
 - [ ] `turnToCommand(90°)` reaches heading within 2°; a blocked turn times out
-      and the routine aborts with `COMMAND FAULT: … turnTo timed out`.
+      and the routine goes on to its next step.
 - [ ] `holdCommand` settles within 1 in / 2°.
 
 **Cancellation and takeover**
@@ -533,32 +395,12 @@ Record results in `PROGRESS.md`.
 - [ ] Localizer fault drill (step 7) in teleop and in autonomous.
 - [ ] Command fault drill (step 7), including the `TODO()` variant: the op-mode
       ends with every motor stopped and the log ends `LOOP CRASHED`, `stop`.
-- [ ] Unplugged Pinpoint at init: Health reports it, auto refuses to start.
+- [ ] Unplugged Pinpoint at init: Health reports it; auto still runs and logs
+      `AUTO: starting without a ready localizer`, unless the pose itself is lost.
 
-**HIVE tags** (Hive Tag Survey, above)
+**HIVE tags** (HIVE survey, above)
 - [ ] Four tags of one CELL agree on its goal within ~1 in, head-on and from the side.
 - [ ] Horizontal distance and goal height match a tape measure.
 - [ ] Raised and lowered tags separate cleanly; `raisedMinHeightIn` set between them.
 - [ ] A tip is reported once; a still HIVE never flips.
 - [ ] Staged field reads RED audience / BLUE far raised.
-
-**Recording and field view**
-- [ ] `IntegrationSample.wpilog` passes the AdvantageScope GUI checks under
-      "Flight recorder validation".
-- [ ] A 2-minute teleop log opens in AdvantageScope; `Field/Robot` draws the
-      robot in the right place and orientation on the FTC field, starting from
-      a known parked pose (axis check above: Pedro's origin corner draws
-      bottom-left, heading 0 points right).
-- [ ] `pose`, `velocity`, `driveMode`, `follow/*`, `battery`, `gamepad1/*`,
-      `loop/*`, `Drive/*`, `Localizer/*` and season subsystem channels plot
-      with sensible values; events line up with what happened.
-- [ ] `make pull-logs 2` pulls the newest Auto + TeleOp logs and MaxScope summarises them.
-- [ ] A teleop log with a driver takeover shows `Driver sticks` interrupted and
-      resumed in `commands/events`, `commands/lost` stays 0, and the analyzer
-      reports `instrumented commands only`.
-- [ ] Log size stays bounded (a host test run wrote ~24 kB/s at 50 Hz) and the file is intact
-      after stopping normally and after a battery pull.
-- [ ] Second-run heading drill (step 4): a second init reads (0, 0, 0), and
-      teleop after an autonomous does not inherit the autonomous pose.
-- [ ] The last `Field/Robot` sample of a stopped log is where the robot
-      actually stopped, not the field origin.

@@ -12,6 +12,7 @@ import com.pedropathing.math.Pose
 import com.pedropathing.math.Vector2D
 import com.pedropathing.math.Velocity
 import com.pedropathing.paths.Path
+import com.pedropathing.revhub.drivetrains.Mecanum
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.HardwareMap
 import kotlin.math.abs
@@ -22,6 +23,7 @@ import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.teamcode.core.logging.logged
+import org.firstinspires.ftc.teamcode.pedro.VoltageCompensatedMecanum
 
 /**
  * The one owner of the drivetrain. Every drive command requires this
@@ -35,8 +37,8 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
  *    not arrival; Pedro then holds or idles.
  *  - [holdCommand]: on measured arrival within [DriveConfig] tolerances, or
  *    after its timeout (a bounded wait, not a failure).
- *  - [turnToCommand]: on measured heading; its timeout throws, which aborts
- *    the routine.
+ *  - [turnToCommand]: on measured heading, or after its timeout (a bounded
+ *    wait, so the routine moves on).
  *
  * Each command cleans up at most once per start, because Ivy 1.1.1 can end
  * a command that never started, or end one twice (AI-GUIDE.md).
@@ -51,20 +53,6 @@ class MecanumDriveSubsystem(
         val strafe: Double,
         val turn: Double,
         val precision: Boolean = false,
-        /**
-         * When non-null, replaces the curved-and-scaled stick [turn] with a
-         * direct motor power, CCW-positive (Pedro's convention, unlike [turn]
-         * which is stick-convention +right/CW). For heading assists whose
-         * controller output is already a power.
-         */
-        val turnPower: Double? = null,
-        /**
-         * When non-null, replaces the curved-and-scaled stick [forward] with a
-         * direct motor power (+forward) **and forces robot-centric drive for
-         * that tick**: a camera-derived forward means "towards what the camera
-         * sees", which is robot-relative by construction.
-         */
-        val forwardPower: Double? = null,
     )
 
     /** Per-op-mode driver state, seeded from [DriveConfig.fieldCentricDefault]. */
@@ -87,28 +75,20 @@ class MecanumDriveSubsystem(
     private var latchedPathProgress = 0.0
 
     override fun init(hardwareMap: HardwareMap) {
-        loggedMotors = MOTOR_NAMES.map { (label, name) ->
-            label to try {
+        motors = MOTOR_NAMES.map { (_, name) ->
+            try {
                 hardwareMap.tryGet(DcMotorEx::class.java, name)
             } catch (_: Throwable) {
                 null
             }
-        }.filter { it.second != null }.map { it.first to it.second!! }
+        }
     }
 
-    /**
-     * Stick-driven manual drive: [DriveConfig] curve, scaling, precision and
-     * field-centric selection. Assists reuse it with the
-     * [TeleopInput.turnPower]/[TeleopInput.forwardPower] overrides.
-     */
-    fun teleopCommand(
-        onStart: () -> Unit = {},
-        onEnd: (EndCondition) -> Unit = {},
-        name: String = "Drive teleop",
-        input: () -> TeleopInput,
-    ): Command = logged(name, teleop(onStart, onEnd, input))
+    /** Stick-driven manual drive: [DriveConfig] curve, scaling, precision and field-centric selection. */
+    fun teleopCommand(name: String = "Drive teleop", input: () -> TeleopInput): Command =
+        logged(name, teleop(onStart = {}, input = input))
 
-    private fun teleop(onStart: () -> Unit, onEnd: (EndCondition) -> Unit, input: () -> TeleopInput): CommandBuilder {
+    private fun teleop(onStart: () -> Unit, input: () -> TeleopInput): CommandBuilder {
         var running = false
         return Command.build()
             .requiring(this)
@@ -118,12 +98,11 @@ class MecanumDriveSubsystem(
             }
             // Ivy still executes a command interrupted earlier in the same tick.
             .setExecute { if (running) stageTeleop(input()) }
-            .setEnd { endCondition ->
+            .setEnd {
                 if (running) {
                     running = false
                     stagedManual = null
                     follower.stop()
-                    onEnd(endCondition)
                 }
             }
     }
@@ -135,24 +114,23 @@ class MecanumDriveSubsystem(
      * Make it the default command too.
      */
     fun robotCentricFallbackCommand(name: String = "Drive robot-centric fallback", input: () -> TeleopInput): Command =
-        logged(name, teleop(onStart = { odometryFallback = true }, onEnd = {}, input = input).setPriority(Int.MAX_VALUE))
+        logged(name, teleop(onStart = { odometryFallback = true }, input = input).setPriority(Int.MAX_VALUE))
 
     private fun stageTeleop(i: TeleopInput) {
         val scale = DriveConfig.teleopPowerScale *
             (if (i.precision) DriveConfig.precisionPowerScale else 1.0)
         val exp = DriveConfig.inputExponent.takeIf { it.isFinite() && it > 0.0 } ?: 1.0
-        val forward = i.forwardPower?.asDirectPower() ?: (i.forward.curve(exp) * scale)
+        var fwd = i.forward.curve(exp) * scale
         // FTC sticks use +x right/CW turn; Pedro uses +lateral left/CCW-positive heading.
         var strafe = -i.strafe.curve(exp) * scale
-        var fwd = forward
         // Pedro 2 capped the translation vector at magnitude 1; keep the same driver feel.
         val magnitude = hypot(fwd, strafe)
         if (magnitude > 1.0) {
             fwd /= magnitude
             strafe /= magnitude
         }
-        val turn = i.turnPower?.asDirectPower() ?: (-i.turn.curve(exp) * scale)
-        val robotCentric = i.forwardPower != null || !fieldCentric || odometryFallback
+        val turn = -i.turn.curve(exp) * scale
+        val robotCentric = !fieldCentric || odometryFallback
         // An invalid heading must never rotate the sticks: NaN powers are
         // dropped by Pedro's motor cache, which would leave the last power applied.
         val heading = if (robotCentric) Double.NaN else follower.pose().heading()
@@ -194,7 +172,7 @@ class MecanumDriveSubsystem(
      * the timeout only bounds how long a routine waits, so FINISH in the log is
      * not proof of arrival.
      */
-    fun holdCommand(pose: Pose, timeoutMs: Double = DEFAULT_HOLD_TIMEOUT_MS, name: String = "Drive hold"): Command {
+    fun holdCommand(pose: Pose, timeoutMs: Double = DEFAULT_TIMEOUT_MS, name: String = "Drive hold"): Command {
         require(timeoutMs.isFinite() && timeoutMs >= 0.0) { "hold timeout must be finite and non-negative" }
         var updatesAtStart = 0L
         var startNs = 0L
@@ -221,11 +199,12 @@ class MecanumDriveSubsystem(
 
     /**
      * Hold the current position while turning to an absolute heading. Done
-     * when the measured heading is within [DriveConfig.holdToleranceRadians].
-     * If it has not converged within [timeoutMs] it throws: a timed-out turn is
-     * never reported as success. Always stops the follower when it ends.
+     * when the measured heading is within [DriveConfig.holdToleranceRadians],
+     * or after [timeoutMs], so a turn that can't quite converge doesn't stall
+     * the routine; FINISH in the log is not proof it got there. Always stops
+     * the follower when it ends.
      */
-    fun turnToCommand(radians: Double, timeoutMs: Double = 2_000.0, name: String = "Drive turn"): Command {
+    fun turnToCommand(radians: Double, timeoutMs: Double = DEFAULT_TIMEOUT_MS, name: String = "Drive turn"): Command {
         require(radians.isFinite()) { "turn heading must be finite" }
         require(timeoutMs.isFinite() && timeoutMs >= 0.0) { "turn timeout must be finite and non-negative" }
         var startNs = 0L
@@ -243,12 +222,9 @@ class MecanumDriveSubsystem(
             .setDone {
                 val heading = pose.heading()
                 check(heading.isFinite()) { "turnTo lost its heading measurement" }
-                val error = abs(shortestAngleDelta(heading, radians))
-                val reached = updateCount > updatesAtStart && error < DriveConfig.holdToleranceRadians
-                check(reached || (clock.nanos() - startNs) / 1e6 < timeoutMs) {
-                    "turnTo timed out after $timeoutMs ms; heading error ${Math.toDegrees(error)} deg"
-                }
-                reached
+                val reached = updateCount > updatesAtStart &&
+                    abs(shortestAngleDelta(heading, radians)) < DriveConfig.holdToleranceRadians
+                reached || (clock.nanos() - startNs) / 1e6 >= timeoutMs
             }
             .setEnd {
                 if (running) halt()
@@ -324,48 +300,81 @@ class MecanumDriveSubsystem(
 
     // ------------------------------------------------------- motor channels
 
-    private var loggedMotors: List<Pair<String, DcMotorEx>> = emptyList()
-    private var motorSampleIndex = 0
-    private var lastMotorSampleNs = Long.MIN_VALUE
-    private var sampledMotorIndex = -1
-    private var sampledPower = 0.0
+    /** In Pedro's mixer order ([MOTOR_NAMES]); null where the hardware map has no such motor. */
+    private var motors: List<DcMotorEx?> = emptyList()
+    private val mecanum = follower.drivetrain as? Mecanum
+    private val commandedPower = DoubleArray(MOTOR_NAMES.size)
+    private val wheelVelocity = DoubleArray(MOTOR_NAMES.size) { Double.NaN }
+    private var currentSampleIndex = 0
+    private var lastCurrentSampleNs = Long.MIN_VALUE
+    private var sampledCurrentIndex = -1
     private var sampledCurrentAmps = 0.0
 
     override fun periodic() {
-        sampleNextMotor()
+        readWheelVelocities()
+        sampleNextCurrent()
+    }
+
+    /** Encoder velocities come from the bulk read, so every tick is free. */
+    private fun readWheelVelocities() {
+        for (i in wheelVelocity.indices) {
+            wheelVelocity[i] = try {
+                motors.getOrNull(i)?.velocity ?: Double.NaN
+            } catch (_: Throwable) {
+                Double.NaN
+            }
+        }
     }
 
     /**
-     * getPower()/getCurrent() are real Lynx transactions, not bulk-cache
-     * backed, so one motor is sampled every [MOTOR_SAMPLE_INTERVAL_NS]
-     * round-robin (each motor refreshes about every 200 ms).
+     * getCurrent() is a real Lynx transaction, not bulk-cache backed, so one
+     * motor is sampled every [CURRENT_SAMPLE_INTERVAL_NS] round-robin (each
+     * motor refreshes about every 800 ms). The battery analysis uses the hubs'
+     * total current instead; this only shows which motor draws what. A sample
+     * stays pending until [logState] writes it, since the recorder skips ticks.
      */
-    private fun sampleNextMotor() {
-        sampledMotorIndex = -1
-        if (loggedMotors.isEmpty()) return
+    private fun sampleNextCurrent() {
+        if (motors.isEmpty()) return
         val now = clock.nanos()
-        if (lastMotorSampleNs != Long.MIN_VALUE && now - lastMotorSampleNs < MOTOR_SAMPLE_INTERVAL_NS) return
-        lastMotorSampleNs = now
-        val index = motorSampleIndex
-        motorSampleIndex = (motorSampleIndex + 1) % loggedMotors.size
+        if (lastCurrentSampleNs != Long.MIN_VALUE && now - lastCurrentSampleNs < CURRENT_SAMPLE_INTERVAL_NS) return
+        lastCurrentSampleNs = now
+        val index = currentSampleIndex
+        currentSampleIndex = (currentSampleIndex + 1) % motors.size
+        val motor = motors[index] ?: return
         try {
-            val motor = loggedMotors[index].second
-            sampledPower = motor.power
             sampledCurrentAmps = motor.getCurrent(CurrentUnit.AMPS)
-            sampledMotorIndex = index
+            sampledCurrentIndex = index
         } catch (_: Throwable) {
             // Logging must never stop the drive; the channel just goes quiet.
+        }
+    }
+
+    /**
+     * Pedro's mixer keeps the last powers it wrote, but its stop() zeroes the
+     * motors without touching them, so a stopped drivetrain is recorded as zero.
+     */
+    private fun recordCommandedPower(stopped: Boolean) {
+        val wheels = mecanum?.wheelPowers
+        for (i in commandedPower.indices) {
+            commandedPower[i] = when {
+                wheels == null -> Double.NaN
+                stopped -> 0.0
+                else -> wheels[i]
+            }
         }
     }
 
     override fun logState(log: StateLog) {
         log.put("fieldCentric", fieldCentric)
         log.put("odometryFallback", odometryFallback)
-        val index = sampledMotorIndex
-        if (index < 0) return
-        val label = loggedMotors[index].first
-        log.put("motors/$label/power", sampledPower)
-        log.put("motors/$label/currentAmps", sampledCurrentAmps)
+        log.put("motors/power", commandedPower)
+        log.put("motors/velocityTps", wheelVelocity)
+        (follower.drivetrain as? VoltageCompensatedMecanum)?.let { log.put("voltageScale", it.scale()) }
+        val index = sampledCurrentIndex
+        if (index >= 0) {
+            log.put("motors/${MOTOR_NAMES[index].first}/currentAmps", sampledCurrentAmps)
+            sampledCurrentIndex = -1
+        }
     }
 
     override fun writeHardware() {
@@ -373,10 +382,13 @@ class MecanumDriveSubsystem(
         stagedManual = null
         if (odometryFallback) {
             follower.drivetrain.drive(staged ?: DrivePowers.zero(), true)
+            recordCommandedPower(stopped = false)
             return
         }
         if (staged != null) follower.manual(staged)
+        val idle = follower.mode() == Follower.Mode.IDLE
         follower.update()
+        recordCommandedPower(stopped = idle)
         updateCount++
         if (follower.following()) {
             val sampled = (follower.pathIndex() + follower.parametricCompletion()) / pathSegments
@@ -391,6 +403,12 @@ class MecanumDriveSubsystem(
 
     override fun onCommandFault() = halt()
 
+    /** Zero the motors but keep following: the next good update drives the path again. */
+    override fun onWriteFault() {
+        follower.drivetrain.stop()
+        recordCommandedPower(stopped = true)
+    }
+
     override fun stop() = halt()
 
     /** Stop following and write zero power now, without waiting for the next update. */
@@ -399,22 +417,22 @@ class MecanumDriveSubsystem(
         latchedPathProgress = 0.0
         follower.stop()
         follower.drivetrain.stop()
+        recordCommandedPower(stopped = true)
     }
 
     private companion object {
+        /** Pedro's mixer order, which the `motors/power` and `motors/velocityTps` arrays follow. */
         val MOTOR_NAMES = listOf(
             "leftFront" to RobotConfig.Drive.FRONT_LEFT_MOTOR,
-            "leftRear" to RobotConfig.Drive.BACK_LEFT_MOTOR,
             "rightFront" to RobotConfig.Drive.FRONT_RIGHT_MOTOR,
+            "leftRear" to RobotConfig.Drive.BACK_LEFT_MOTOR,
             "rightRear" to RobotConfig.Drive.BACK_RIGHT_MOTOR,
         )
-        const val MOTOR_SAMPLE_INTERVAL_NS = 50_000_000L
-        const val DEFAULT_HOLD_TIMEOUT_MS = 2_000.0
+        const val CURRENT_SAMPLE_INTERVAL_NS = 200_000_000L
+        /** How long a hold or turn waits for arrival before the routine moves on. */
+        const val DEFAULT_TIMEOUT_MS = 2_000.0
     }
 }
-
-/** A controller output consumed directly as a motor power. A dead controller must not NaN the motors. */
-private fun Double.asDirectPower(): Double = if (isFinite()) coerceIn(-1.0, 1.0) else 0.0
 
 /** Applies a signed power curve: preserves sign, scales magnitude by x^exponent. */
 private fun Double.curve(exponent: Double): Double = Math.copySign(Math.pow(Math.abs(this), exponent), this)
