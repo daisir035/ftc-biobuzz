@@ -51,6 +51,26 @@ reuse those settings with the captured logical positions later.
   are also written as `SHOVEL CAPTURE` events in the WPILOG. They do not
   automatically become competition presets or survive a new run in the UI.
 
+### Linked shovel angle test
+
+Diagnostics → **Shovel Angle Test** uses the aligned pair measured on this
+robot: left **0.3600**, right **0.2250**, in `ShovelConfig` in
+`subsystems/ShovelSubsystem.kt`. This pair is **not** the fully raised zero.
+
+After START, hold **L1** to apply both positions. **Cross** selects the aligned
+reference, **Circle** selects preset 1 (+60° initially), **Square** selects
+preset 2 (+70° initially). Dpad **up/down** changes the relative servo rotation
+by 1°; hold **R1** for 0.2° steps. Release L1 to disable PWM. Targets, presets,
+step and the reference pair are editable under `ShovelConfig` in Panels.
+
+The offset is relative to the measured pair, using 300° for the configured
+500–2500 µs range. Left remains REVERSE and right FORWARD. Positive offsets
+increase both logical positions; they are servo-shaft rotations, not measured
+absolute shovel angles. The shared offset is limited when either servo reaches
+0 or 1, preserving the aligned pair instead of clipping each side independently.
+Mechanical clearance still needs to be checked on the robot. No movement is
+commanded during INIT or automatically at START.
+
 ## 2. Motor directions (on blocks)
 
 Use AutoTune's **Mecanum Tuner** (below). Positive power must
