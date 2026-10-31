@@ -57,10 +57,10 @@ class IntakeSubsystem : SubsystemBase("Intake") {
 
     private companion object {
         /**
-         * Motor names whose positive power runs against collecting.
-         * The driver-confirmed intake direction is FORWARD, so none are reversed.
+         * Reverse the configured intake motors: the on-robot test showed
+         * that FORWARD collected with eject power instead of collect power.
          */
-        val REVERSED = emptySet<String>()
+        val REVERSED = RobotConfig.Intake.MOTORS.toSet()
     }
 }
 

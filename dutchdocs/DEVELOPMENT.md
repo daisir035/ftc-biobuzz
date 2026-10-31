@@ -291,7 +291,7 @@ Season mechanisms live in `subsystems/` next to the drive: `IntakeSubsystem`,
 still an unconfigured skeleton** — its `init` fails explicitly.
 - Hardware names: intake `intake`, feeder `feeder`, flywheel `up` / `down`
   (`RobotConfig`). All are goBILDA 5203 1620 RPM. SDK directions for this robot's
-  mounting: intake FORWARD, feeder FORWARD, `up` FORWARD, `down` REVERSE.
+  mounting: intake REVERSE, feeder FORWARD, `up` FORWARD, `down` REVERSE.
   Verify at low power before the first full-speed run.
 - The two flywheel motors are synchronized, so only `up`'s encoder
   (`RobotConfig.Shooter.FEEDBACK_MOTOR`) is read and both get the same power.
