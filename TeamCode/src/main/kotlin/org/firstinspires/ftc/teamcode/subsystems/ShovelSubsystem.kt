@@ -53,10 +53,16 @@ class ShovelSubsystem : SubsystemBase("Shovel") {
             val left = ShovelConfig.leftAlignedPosition
             val right = ShovelConfig.rightAlignedPosition
             val requested = degrees()
-            require(left in 0.0..1.0 && right in 0.0..1.0 && requested.isFinite()) {
+            val fullyLowered = ShovelConfig.fullyLoweredOffsetDegrees
+            require(left in 0.0..1.0 && right in 0.0..1.0 && requested.isFinite() &&
+                fullyLowered.isFinite() && fullyLowered >= 0.0
+            ) {
                 "Shovel alignment must be in 0..1 and angle must be finite"
             }
-            offsetDegrees = requested.coerceIn(-min(left, right) * 300.0, (1.0 - max(left, right)) * 300.0)
+            offsetDegrees = requested.coerceIn(
+                -min(left, right) * 300.0,
+                min((1.0 - max(left, right)) * 300.0, fullyLowered),
+            )
             stagePositions(left + offsetDegrees / 300.0, right + offsetDegrees / 300.0)
         }.requiring(this).setEnd { enabled = false },
     )
@@ -93,7 +99,8 @@ object ShovelConfig {
     @JvmField var leftAlignedPosition = 0.36
     @JvmField var rightAlignedPosition = 0.225
     @JvmField var targetOffsetDegrees = 0.0
-    @JvmField var preset1OffsetDegrees = 60.0
-    @JvmField var preset2OffsetDegrees = 70.0
+    @JvmField var fullyLoweredOffsetDegrees = 133.0
+    @JvmField var preset1OffsetDegrees = 0.0
+    @JvmField var preset2OffsetDegrees = 125.0
     @JvmField var stepDegrees = 1.0
 }

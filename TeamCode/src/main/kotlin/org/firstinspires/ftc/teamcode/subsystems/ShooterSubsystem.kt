@@ -178,7 +178,7 @@ object ShooterConfig {
     @JvmField var targetRpm = 1400.0
 
     /** Match presets (motor output RPM), chosen on the operator's dpad. Placeholders until shots are tested. */
-    @JvmField var nearRpm = 1200.0
+    @JvmField var nearRpm = 600.0
     @JvmField var farRpm = 1500.0
 
     /** |measured − target| at or under this counts as [ShooterSubsystem.atTarget]. */
@@ -192,7 +192,7 @@ object ShooterConfig {
     @JvmField var kF = 0.00062
 
     /** Power per RPM of error. */
-    @JvmField var kP = 0.002
+    @JvmField var kP = 0.02
     @JvmField var kI = 0.0
     @JvmField var kD = 0.0
 

@@ -25,7 +25,8 @@ Driver Station config names: `FL`, `FR`,
 init (Preflight lists what's missing); a *swapped* name shows up in step 2.
 
 "Competition" also requires intake `intake`, feeder `feeder`, and flywheel
-motors `up` / `down`. Connect the flywheel feedback encoder to `up`.
+motors `up` / `down`, plus shovel servos `left` / `right`.
+Connect the flywheel feedback encoder to `up`.
 The standalone "Shooter Test" still uses `shoot`.
 
 ## Shovel position capture
@@ -58,8 +59,10 @@ robot: left **0.3600**, right **0.2250**, in `ShovelConfig` in
 `subsystems/ShovelSubsystem.kt`. This pair is **not** the fully raised zero.
 
 After START, hold **L1** to apply both positions. **Cross** selects the aligned
-reference, **Circle** selects preset 1 (+60° initially), **Square** selects
-preset 2 (+70° initially). Dpad **up/down** changes the relative servo rotation
+reference, **Circle** selects preset 1 (0°), **Square** selects
+preset 2 (125°). The measured fully lowered offset is 133°, enforced as an
+upper limit by `ShovelConfig.fullyLoweredOffsetDegrees`.
+Dpad **up/down** changes the relative servo rotation
 by 1°; hold **R1** for 0.2° steps. Release L1 to disable PWM. Targets, presets,
 step and the reference pair are editable under `ShovelConfig` in Panels.
 

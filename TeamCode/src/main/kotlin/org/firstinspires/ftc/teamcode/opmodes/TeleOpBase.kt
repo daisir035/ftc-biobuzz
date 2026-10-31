@@ -21,7 +21,7 @@ import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem.TeleopInp
  *
  * Standard controls:
  *  - left stick translate, right stick turn (per [DriveConfig] scaling)
- *  - **R2** — precision mode while held
+ *  - **R2** — precision mode while held (Competition overrides this to L2)
  *  - **Create + Triangle** — reset heading to zero (Create, not Options:
  *    Options+Cross/Circle are the Driver Station's gamepad re-bind chords)
  *  - **Create + Circle** — toggle field-centric / robot-centric
@@ -41,6 +41,9 @@ abstract class TeleOpBase : OpModeBase() {
     /** Multiplier on the turn stick; lower it for gentler rotation. */
     protected open val turnScale = 1.0
 
+    /** Season teleops may reserve R2 for another action. */
+    protected open val precisionRequested: Boolean get() = driver.r2 > 0.1
+
     protected lateinit var drive: MecanumDriveSubsystem
         private set
 
@@ -57,7 +60,7 @@ abstract class TeleOpBase : OpModeBase() {
                 forward = driver.leftStickY,
                 strafe = driver.leftStickX,
                 turn = driver.rightStickX * turnScale,
-                precision = driver.r2 > 0.1,
+                precision = precisionRequested,
             )
         }
         drive.defaultCommand = drive.teleopCommand(input = stickInput)

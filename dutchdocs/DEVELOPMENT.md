@@ -311,10 +311,15 @@ still an unconfigured skeleton** — its `init` fails explicitly.
 - Feeder: `feedOnceReady { shooter.atTarget }` waits for the flywheel to
   reach speed once, then feeds without pausing until released, so a burst
   is continuous.
-- "Competition" (`opmodes/CompetitionTeleOp.kt`): driver R1/L1 hold
-  collect/eject; operator Cross toggles the flywheel, dpad up/down picks
+- "Competition" (`opmodes/CompetitionTeleOp.kt`) uses gamepad 1 only: R1/L1 hold
+  collect/eject; Cross toggles the flywheel, dpad up/down picks
   far/near, R2 (hold) shoots — wait for the flywheel to reach speed once,
   then run intake and feeder together without pausing until released.
+  L2 holds precision driving; Square switches the shovels between 0° and 125°.
+  The shovels hold 0° after START and disable PWM on STOP. The aligned reference
+  is left 0.36/right 0.225, and the measured fully lowered limit is 133°.
+  `ShovelConfig` holds these values; 0° is the existing reference, not a newly
+  inferred raised zero. Existing Create+Triangle/Create+Circle drive chords remain.
 - While driver R1 collects, feeder assists at `FeederConfig.intakePower`
   (0.2). Releasing R1 stops the intake and feeder, waits
   `intakeReleaseDelayMs` (200 ms), then reverses the feeder at

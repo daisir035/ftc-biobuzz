@@ -42,6 +42,7 @@ class ShovelAngleTestTeleOp : OpModeBase() {
             put("right reference", c.rightAlignedPosition, decimals = 4)
             put("requested offset deg", c.targetOffsetDegrees, decimals = 1)
             put("applied offset deg", shovel.offsetDegrees, decimals = 1)
+            put("fully lowered limit deg", c.fullyLoweredOffsetDegrees, decimals = 1)
             put("left commanded position", shovel.leftPosition, decimals = 4)
             put("right commanded position", shovel.rightPosition, decimals = 4)
             put("PWM enabled", shovel.enabled)

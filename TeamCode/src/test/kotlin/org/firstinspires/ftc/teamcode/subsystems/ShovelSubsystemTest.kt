@@ -114,6 +114,8 @@ class ShovelSubsystemTest {
             Triple(0.0, 0.36, 0.225),
             Triple(60.0, 0.56, 0.425),
             Triple(70.0, 0.5933333333333333, 0.4583333333333333),
+            Triple(125.0, 0.7766666666666666, 0.6416666666666666),
+            Triple(133.0, 0.8033333333333333, 0.6683333333333333),
             Triple(-30.0, 0.26, 0.125),
         )) {
             angle = degrees
@@ -136,9 +138,9 @@ class ShovelSubsystemTest {
         var angle = 1000.0
         Scheduler.schedule(shovel.holdOffsetDegrees { angle })
         tick()
-        assertEquals(192.0, shovel.offsetDegrees, 1e-9)
-        assertEquals(1.0, shovel.leftPosition, 1e-9)
-        assertEquals(0.865, shovel.rightPosition, 1e-9)
+        assertEquals(133.0, shovel.offsetDegrees, 1e-9)
+        assertEquals(0.8033333333333333, shovel.leftPosition, 1e-9)
+        assertEquals(0.6683333333333333, shovel.rightPosition, 1e-9)
 
         angle = -1000.0
         tick()
