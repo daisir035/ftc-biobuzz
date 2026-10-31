@@ -7,41 +7,56 @@ import com.qualcomm.robotcore.hardware.DcMotor
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.DcMotorSimple
 import com.qualcomm.robotcore.hardware.HardwareMap
+import com.qualcomm.robotcore.hardware.VoltageSensor
 import kotlin.math.abs
 import org.firstinspires.ftc.teamcode.RobotConfig
+import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.teamcode.core.logging.logged
 
 /**
- * Flywheel motors ([RobotConfig.Shooter.MOTORS] by default), all driven at one
- * target RPM. Velocity is closed-looped by the motor's built-in PID
- * (`RUN_USING_ENCODER`): commands set [targetRpm], [writeHardware] flushes it
- * as ticks/s, [periodic] reads the measured RPM back from the encoders.
+ * Flywheel motors ([RobotConfig.Shooter.MOTORS] by default), mechanically
+ * synchronized, so one encoder ([feedbackMotor]) closes the loop and every
+ * motor gets the same power. The controller runs here, not in the hub, so
+ * its gains are plain [ShooterConfig] fields editable in Panels:
+ *
+ * `power = kF · target · (nominalVolts / battery) + kP · error + kI · ∫error + kD · d(error)/dt`
+ *
+ * clamped to 0..1: a flywheel is never braked by reverse power. Commands set
+ * [targetRpm]; [periodic] reads the encoder and battery; [writeHardware]
+ * computes and writes the power.
  *
  * Shooting speed eventually comes from [ShotModel.rpmForDistance]; until the
- * model is fitted, callers pass an RPM directly ([spinUp]) and the test
- * op-mode tunes it live from Panels / the dpad.
+ * model is fitted, callers pass an RPM directly ([spinUp]).
  */
 class ShooterSubsystem(
     private val motorNames: List<String> = RobotConfig.Shooter.MOTORS,
+    private val feedbackMotor: String = RobotConfig.Shooter.FEEDBACK_MOTOR,
+    private val clock: Clock = Clock.SYSTEM,
 ) : SubsystemBase("Shooter") {
 
     private var motors: List<DcMotorEx> = emptyList()
-
-    /** PIDF last written to the motors; read from the hub at init. */
-    private var appliedP = Double.NaN
-    private var appliedI = Double.NaN
-    private var appliedD = Double.NaN
-    private var appliedF = Double.NaN
+    private var encoder: DcMotorEx? = null
+    private var voltageSensor: VoltageSensor? = null
 
     /** Commanded flywheel speed; null means stopped. Set by commands only. */
     var targetRpm: Double? = null
         private set
 
-    /** Encoder-measured speed, averaged over the motors; 0.0 before init. */
+    /** Encoder-measured speed of [feedbackMotor]; 0.0 before init. */
     var measuredRpm: Double = 0.0
         private set
+
+    /** Power written to every motor at the last [writeHardware]. */
+    var power: Double = 0.0
+        private set
+
+    private var batteryVolts = Double.NaN
+    private var lastVoltageReadNs = Long.MIN_VALUE
+    private var integral = 0.0
+    private var lastError = Double.NaN
+    private var lastControlNs = Long.MIN_VALUE
 
     /** Close enough to [targetRpm] to take a shot. */
     val atTarget: Boolean
@@ -51,72 +66,74 @@ class ShooterSubsystem(
         }
 
     override fun init(hardwareMap: HardwareMap) {
+        require(feedbackMotor in motorNames) { "Feedback motor \"$feedbackMotor\" is not one of $motorNames" }
         motors = motorNames.map { name ->
             hardwareMap.get(DcMotorEx::class.java, name).apply {
                 direction = if (name in REVERSED) DcMotorSimple.Direction.REVERSE else DcMotorSimple.Direction.FORWARD
-                zeroPowerBehavior = DcMotor.ZeroPowerBehavior.BRAKE
-                mode = DcMotor.RunMode.RUN_USING_ENCODER
+                // FLOAT: braking a spinning flywheel loads the gearbox for nothing.
+                zeroPowerBehavior = DcMotor.ZeroPowerBehavior.FLOAT
+                // The encoder is still read; the velocity loop runs in writeHardware().
+                mode = DcMotor.RunMode.RUN_WITHOUT_ENCODER
             }
         }
-        // Baseline for applyPidfIfChanged: the hub firmware defaults of the
-        // first motor. The SDK keeps no numeric defaults of its own.
-        val pidf = motors.first().getPIDFCoefficients(DcMotor.RunMode.RUN_USING_ENCODER)
-        appliedP = pidf.p
-        appliedI = pidf.i
-        appliedD = pidf.d
-        appliedF = pidf.f
+        encoder = motors[motorNames.indexOf(feedbackMotor)]
+        voltageSensor = hardwareMap.voltageSensor.iterator().let { if (it.hasNext()) it.next() else null }
     }
 
     override fun periodic() {
-        measuredRpm = if (motors.isEmpty()) {
-            0.0
-        } else {
-            motors.map { it.velocity / ShooterConfig.ticksPerRev * 60.0 }.average()
+        // Direction applies to the reading too: positive is launching speed.
+        measuredRpm = (encoder?.velocity ?: 0.0) / ShooterConfig.ticksPerRev * 60.0
+        // Battery voltage is not in the bulk read: one extra hub read every 100 ms.
+        val now = clock.nanos()
+        val sensor = voltageSensor
+        if (sensor != null && (lastVoltageReadNs == Long.MIN_VALUE || now - lastVoltageReadNs >= 100_000_000L)) {
+            batteryVolts = sensor.voltage
+            lastVoltageReadNs = now
         }
     }
 
     override fun writeHardware() {
-        applyPidfIfChanged()
         val target = targetRpm
-        if (target == null) {
-            motors.forEach { it.power = 0.0 }
+        power = if (target == null) {
+            resetController()
+            0.0
         } else {
-            val ticksPerSec = target / 60.0 * ShooterConfig.ticksPerRev
-            motors.forEach { it.velocity = ticksPerSec }
+            control(target)
         }
+        motors.forEach { it.power = power }
     }
 
-    /**
-     * Pushes [ShooterConfig]'s velocity PIDF to the motors when a Panels edit
-     * changes it (a Lynx write, so only on change). A NaN slot keeps the
-     * currently applied value — usually the hub default read at init. After
-     * applying, the config fields are refreshed with the values actually in
-     * effect so Panels edits start from what's live.
-     */
-    private fun applyPidfIfChanged() {
+    private fun control(target: Double): Double {
         val c = ShooterConfig
-        if (c.velocityP == appliedP && c.velocityI == appliedI && c.velocityD == appliedD && c.velocityF == appliedF) {
-            return
+        val now = clock.nanos()
+        val error = target - measuredRpm
+        val dt = if (lastControlNs == Long.MIN_VALUE) 0.0 else (now - lastControlNs) / 1e9
+        val voltageScale = if (batteryVolts.isFinite() && batteryVolts > 6.0) c.nominalVolts / batteryVolts else 1.0
+        if (dt > 0.0) {
+            integral += error * dt
+            // Anti-windup: the I term alone never exceeds iLimit power.
+            if (c.kI > 0.0) integral = integral.coerceIn(-c.iLimit / c.kI, c.iLimit / c.kI)
         }
-        val p = if (c.velocityP.isNaN()) appliedP else c.velocityP
-        val i = if (c.velocityI.isNaN()) appliedI else c.velocityI
-        val d = if (c.velocityD.isNaN()) appliedD else c.velocityD
-        val f = if (c.velocityF.isNaN()) appliedF else c.velocityF
-        motors.forEach { it.setVelocityPIDFCoefficients(p, i, d, f) }
-        appliedP = p
-        appliedI = i
-        appliedD = d
-        appliedF = f
-        c.velocityP = p
-        c.velocityI = i
-        c.velocityD = d
-        c.velocityF = f
+        val derivative = if (dt > 0.0 && lastError.isFinite()) (error - lastError) / dt else 0.0
+        lastError = error
+        lastControlNs = now
+        val output = c.kF * target * voltageScale + c.kP * error + c.kI * integral + c.kD * derivative
+        return output.coerceIn(0.0, 1.0)
+    }
+
+    private fun resetController() {
+        integral = 0.0
+        lastError = Double.NaN
+        lastControlNs = Long.MIN_VALUE
     }
 
     /** Holds [ShooterConfig.targetRpm] until interrupted. */
-    fun spinUp(): Command = logged(
+    fun spinUp(): Command = spinUp { ShooterConfig.targetRpm }
+
+    /** Holds [rpm], re-read every tick so a preset change applies while spinning, until interrupted. */
+    fun spinUp(rpm: () -> Double): Command = logged(
         "Shooter spin up",
-        infinite { targetRpm = ShooterConfig.targetRpm }.requiring(this).setEnd { targetRpm = null },
+        infinite { targetRpm = rpm() }.requiring(this).setEnd { targetRpm = null },
     )
 
     override fun onCommandFault() {
@@ -125,6 +142,7 @@ class ShooterSubsystem(
 
     override fun stop() {
         targetRpm = null
+        power = 0.0
         motors.forEach { it.power = 0.0 }
     }
 
@@ -135,46 +153,54 @@ class ShooterSubsystem(
         log.put("targetRpm", targetRpm ?: Double.NaN)
         log.put("measuredRpm", measuredRpm)
         log.put("atTarget", atTarget)
-        log.put("pidfP", appliedP)
-        log.put("pidfI", appliedI)
-        log.put("pidfD", appliedD)
-        log.put("pidfF", appliedF)
+        log.put("power", power)
+        log.put("batteryVolts", batteryVolts)
     }
 
     private companion object {
         /**
-         * Motor names whose positive velocity spins the flywheel backwards.
-         * The two flywheel motors are mounted mirrored, so the right motor is
-         * reversed; both then drive and report speed in flywheel direction.
+         * Motor names whose positive power spins the flywheel backwards.
+         * SDK convention: positive power on a FORWARD motor turns the shaft
+         * counter-clockwise seen from the shaft end. "up" launches
+         * counter-clockwise (FORWARD), "down" clockwise (REVERSE).
          */
-        val REVERSED = setOf(RobotConfig.Shooter.RIGHT_MOTOR)
+        val REVERSED = setOf(RobotConfig.Shooter.DOWN_MOTOR)
     }
 }
 
-/** Flywheel settings, live-editable in Panels. */
+/** Flywheel settings, live-editable in Panels. Copy tuned values back here: nothing is persisted. */
 @Configurable
 object ShooterConfig {
-    /** goBILDA 5203 1620 RPM: 28 ticks/rev × 3.7:1 gearbox, at the output shaft. */
-    @JvmField var ticksPerRev = 103.6
+    /** goBILDA 5203 1620 RPM: 28 ticks/rev × 3.7:1 gearbox, at the output shaft (goBILDA spec: 103.8). */
+    @JvmField var ticksPerRev = 103.8
 
-    /** Spin-up target for [ShooterSubsystem.spinUp] and the test op-mode; below the motor's 1620 RPM max. */
+    /** Spin-up target for [ShooterSubsystem.spinUp] and the test op-modes. */
     @JvmField var targetRpm = 1400.0
+
+    /** Match presets (motor output RPM), chosen on the operator's dpad. Placeholders until shots are tested. */
+    @JvmField var nearRpm = 1200.0
+    @JvmField var farRpm = 1500.0
 
     /** |measured − target| at or under this counts as [ShooterSubsystem.atTarget]. */
     @JvmField var speedToleranceRpm = 60.0
 
     /**
-     * Velocity PIDF for the RUN_USING_ENCODER loop. NaN means "keep the
-     * currently applied value" — at init that is the hub firmware default
-     * (the SDK keeps no numeric defaults of its own). Any edit applies to
-     * all flywheel motors immediately, and the fields refresh to what's in
-     * effect, so tune from Panels, watch `Shooter/measuredRpm`, then type
-     * the working numbers here: the hub forgets them on a power cycle.
+     * Feedforward, power per RPM at [nominalVolts]. Start: 1 / 1620 (free
+     * speed at 12 V); raise it until the flywheel settles near target with
+     * kP = kI = 0, then add kP.
      */
-    @JvmField var velocityP = Double.NaN
-    @JvmField var velocityI = Double.NaN
-    @JvmField var velocityD = Double.NaN
-    @JvmField var velocityF = Double.NaN
+    @JvmField var kF = 0.00062
+
+    /** Power per RPM of error. */
+    @JvmField var kP = 0.002
+    @JvmField var kI = 0.0
+    @JvmField var kD = 0.0
+
+    /** Largest power the I term may contribute. */
+    @JvmField var iLimit = 0.2
+
+    /** Battery voltage [kF] was tuned at; kF is scaled by nominal / measured. */
+    @JvmField var nominalVolts = 12.0
 }
 
 /**

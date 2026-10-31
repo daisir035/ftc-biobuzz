@@ -193,6 +193,13 @@ class Trigger internal constructor(
         }
     }
 
+    /** On each rising edge, cancel [command] if it is scheduled, otherwise schedule it. */
+    fun toggleOnTrue(command: Command): Trigger = bind { prev, curr ->
+        if (!prev && curr) {
+            if (Scheduler.isScheduled(command)) Scheduler.cancel(command) else Scheduler.schedule(command)
+        }
+    }
+
     /** Active only while both this and [other] are active. */
     infix fun and(other: Trigger): Trigger = host.trigger { read() && other.read() }
 

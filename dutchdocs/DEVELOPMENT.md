@@ -287,21 +287,39 @@ Season mechanisms live in `subsystems/` next to the drive: `IntakeSubsystem`,
   hardware, and `init` fails on a missing device.
 - `ballStaged` is null until a ball sensor is fitted.
 
-**Shooter is implemented for the mirrored dual flywheel and a standalone bench
-motor; Turret is still an unconfigured skeleton** — its `init` fails explicitly.
-- Names are in `RobotConfig.Shooter` (a list, like Intake). Settings are in
-  `ShooterConfig`: `ticksPerRev` (goBILDA 5203 1620 RPM = 103.6), `targetRpm`,
-  `speedToleranceRpm`, and velocity `velocityP/I/D/F` (NaN keeps the hub
-  default read at init; a Panels edit applies to all flywheel motors at once).
-- `RUN_USING_ENCODER` velocity PID: `spinUp()` holds `ShooterConfig.targetRpm`,
-  `periodic()` reads the measured RPM, `atTarget` reports when to shoot. The
-  "Duo Shooter Test" diagnostics op-mode runs both flywheel motors and
-  "Shooter Test" runs the standalone single motor (`SINGLE_MOTOR`), each
-  without the drivetrain: hold R2 to spin, dpad up/down steps the
-  target ±100 RPM.
-- Shooter will accept target RPM from `ShotModel.rpmForDistance` (in `ShooterSubsystem.kt`), a
-  distance-to-speed function still to be fitted from shots at measured
-  distances (it returns null until then).
+**Shooter, Feeder and the "Competition" teleop are implemented; Turret is
+still an unconfigured skeleton** — its `init` fails explicitly.
+- Hardware names: intake `intake`, feeder `feeder`, flywheel `up` / `down`
+  (`RobotConfig`). All are goBILDA 5203 1620 RPM. Directions, seen from the
+  shaft end (the SDK turns a FORWARD motor counter-clockwise on positive
+  power): intake collects counter-clockwise (FORWARD), feeder feeds clockwise
+  (REVERSE), `up` launches counter-clockwise (FORWARD), `down` clockwise
+  (REVERSE). Verify at low power before the first full-speed run.
+- The two flywheel motors are synchronized, so only `up`'s encoder
+  (`RobotConfig.Shooter.FEEDBACK_MOTOR`) is read and both get the same power.
+  The velocity PIDF runs in `ShooterSubsystem` (motors in
+  `RUN_WITHOUT_ENCODER`, FLOAT at zero power):
+  `power = kF·target·(nominalVolts/battery) + kP·err + kI·∫err + kD·d(err)/dt`,
+  clamped to 0..1, I term limited to `iLimit`.
+- Everything is live in Panels: `ShooterConfig` (`targetRpm`, `nearRpm`,
+  `farRpm`, `speedToleranceRpm`, `kF/kP/kI/kD`, `iLimit`, `nominalVolts`,
+  `ticksPerRev` 103.8), `IntakeConfig.collectPower/ejectPower`,
+  `FeederConfig.feedPower`. Nothing is persisted: type tuned values back
+  into the code.
+- Tuning: in "Duo Shooter Test" set kP = kI = 0, raise `kF` until
+  `measuredRpm` settles just under target, then add `kP` until recovery
+  after a shot is quick without oscillation. Watch `Shooter/power`,
+  `measuredRpm`, `batteryVolts` in the log.
+- Feeder: `feedOnceReady { shooter.atTarget }` waits for the flywheel to
+  reach speed once, then feeds without pausing until released, so a burst
+  is continuous. No reverse for now.
+- "Competition" (`opmodes/CompetitionTeleOp.kt`): driver R1/L1 hold
+  collect/eject; operator Cross toggles the flywheel, dpad up/down picks
+  far/near, R2 (hold) shoots — intake and feeder together.
+- "Shooter Test" runs the standalone `shoot` motor with its own encoder.
+- Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
+  `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted
+  from shots at measured distances (it returns null until then).
 - Turret owns all mechanically linked turret servos. It will keep a short
   timestamped history of its servo-encoder angle and give `HiveTracker` a
   lookup into it, so each camera frame is placed at its capture time.

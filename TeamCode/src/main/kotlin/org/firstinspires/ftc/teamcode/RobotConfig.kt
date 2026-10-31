@@ -34,9 +34,9 @@ object RobotConfig {
         const val BALL_CAMERA = "ballCamera"
     }
 
-    /** Intake motors; add a name when a second motor is fitted. */
+    /** Intake motors; add a name when a second motor is fitted. Collects counter-clockwise seen from the shaft end. */
     object Intake {
-        val MOTORS = listOf("intakeMotor")
+        val MOTORS = listOf("intake")
     }
 
     /** Middle motors that lift balls to the shooter, and the servo tab that blocks the turret entry. */
@@ -45,14 +45,22 @@ object RobotConfig {
         const val BLOCKER_SERVO = "blockerServo"
     }
 
+    /** Motor that pushes balls from the intake into the flywheel; feeds clockwise seen from the shaft end. */
+    object Feeder {
+        const val MOTOR = "feeder"
+        val MOTORS = listOf(MOTOR)
+    }
+
     /**
-     * Flywheel motors, mounted mirrored: [RIGHT_MOTOR]'s shaft spins opposite
-     * [LEFT_MOTOR]'s for the same flywheel motion (see ShooterSubsystem.REVERSED).
+     * Flywheel motors, mechanically synchronized: [UP_MOTOR] launches turning
+     * counter-clockwise, [DOWN_MOTOR] clockwise, seen from each shaft end (see
+     * ShooterSubsystem.REVERSED). Only [FEEDBACK_MOTOR]'s encoder closes the loop.
      */
     object Shooter {
-        const val LEFT_MOTOR = "L"
-        const val RIGHT_MOTOR = "R"
-        val MOTORS = listOf(LEFT_MOTOR, RIGHT_MOTOR)
+        const val UP_MOTOR = "up"
+        const val DOWN_MOTOR = "down"
+        val MOTORS = listOf(UP_MOTOR, DOWN_MOTOR)
+        const val FEEDBACK_MOTOR = UP_MOTOR
 
         /** Standalone single-flywheel bench motor used by "Shooter Test". */
         const val SINGLE_MOTOR = "shoot"

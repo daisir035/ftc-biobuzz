@@ -24,6 +24,10 @@ Driver Station config names: `FL`, `FR`,
 `BL`, `BR`, Pinpoint `pinpoint`. A wrong name fails at
 init (Preflight lists what's missing); a *swapped* name shows up in step 2.
 
+"Competition" also requires intake `intake`, feeder `feeder`, and flywheel
+motors `up` / `down`. Connect the flywheel feedback encoder to `up`.
+The standalone "Shooter Test" still uses `shoot`.
+
 ## 2. Motor directions (on blocks)
 
 Use AutoTune's **Mecanum Tuner** (below). Positive power must
@@ -349,7 +353,7 @@ Everything below is unverified on hardware after the Ivy / Pedro 3 migration.
 Record results in `PROGRESS.md`.
 
 **Install and reload**
-- [ ] Full APK install succeeds; Driver Station shows Drive Only, Robot Centric
+- [ ] Full APK install succeeds; Driver Station shows Competition, Drive Only, Robot Centric
       Drive, Default Auto RED/BLUE, Just Path RED, Vision Test, Duo Shooter Test,
       Shooter Test (no Pedro Tuning op-mode).
 - [ ] AutoTune page loads at `http://192.168.43.1:10158` and lists Mecanum

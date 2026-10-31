@@ -50,7 +50,7 @@ class AutomaticStateLogTest {
     }
 
     @Test
-    fun mechanismChannelsMatchTheirFormerExplicitLoggers() {
+    fun mechanismChannelsMatchTheirLoggers() {
         val intake = Capture().also { IntakeSubsystem().logState(it) }
         assertEquals(mapOf("power" to 0.0), intake.values)
         val transfer = Capture().also { TransferSubsystem().logState(it) }
@@ -66,10 +66,8 @@ class AutomaticStateLogTest {
                 "targetRpm" to Double.NaN,
                 "measuredRpm" to 0.0,
                 "atTarget" to false,
-                "pidfP" to Double.NaN,
-                "pidfI" to Double.NaN,
-                "pidfD" to Double.NaN,
-                "pidfF" to Double.NaN,
+                "power" to 0.0,
+                "batteryVolts" to Double.NaN,
             ),
             shooter.values,
         )

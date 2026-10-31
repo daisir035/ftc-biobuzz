@@ -84,6 +84,43 @@ class TriggerTest {
     }
 
     @Test
+    fun toggleRunsUntilTheNextPressAndDoesNotRepeatWhileHeld() {
+        val command = endlessCommand()
+        host.button(GamepadEx.Button.CROSS).toggleOnTrue(command)
+        host.lockBindings()
+
+        host.raw.cross = true
+        poll()
+        poll()
+        assertTrue(Scheduler.isScheduled(command))
+
+        host.raw.cross = false
+        poll()
+        assertTrue(Scheduler.isScheduled(command))
+
+        host.raw.cross = true
+        poll()
+        assertFalse(Scheduler.isScheduled(command))
+    }
+
+    @Test
+    fun toggleHeldDuringInitWaitsForReleaseAndAnotherPress() {
+        val command = endlessCommand()
+        host.button(GamepadEx.Button.CROSS).toggleOnTrue(command)
+        host.raw.cross = true
+        host.update(pollTriggers = false)
+        host.lockBindings()
+
+        poll()
+        assertFalse(Scheduler.isScheduled(command))
+        host.raw.cross = false
+        poll()
+        host.raw.cross = true
+        poll()
+        assertTrue(Scheduler.isScheduled(command))
+    }
+
+    @Test
     fun andCompositionRequiresBoth() {
         var other = false
         val cmd = endlessCommand()
