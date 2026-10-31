@@ -2,7 +2,9 @@ package org.firstinspires.ftc.teamcode.opmodes
 
 import com.pedropathing.ivy.Command
 import com.pedropathing.ivy.commands.Commands.instant
+import com.pedropathing.ivy.commands.Commands.waitUntil
 import com.pedropathing.ivy.groups.Groups.parallel
+import com.pedropathing.ivy.groups.Groups.sequential
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import org.firstinspires.ftc.teamcode.RobotConfig
@@ -24,9 +26,8 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
  * Operator (gamepad2):
  *  - **Cross** — flywheel on/off at the selected preset
  *  - **dpad up / down** — far / near preset ([ShooterConfig.farRpm] / [ShooterConfig.nearRpm])
- *  - **R2** (hold) — shoot: the intake runs at once; the feeder
- *    starts the first time the flywheel is at speed and then feeds without
- *    pausing, so the whole burst goes out continuously
+ *  - **R2** (hold) — shoot: intake and feeder wait until the flywheel first
+ *    reaches speed, then run without pausing until released
  *
  * Shooting takes the intake, so it overrides the driver's collect until released.
  */
@@ -68,7 +69,10 @@ class CompetitionTeleOp : TeleOpBase() {
 
     private fun shoot(): Command = logged(
         "Shoot",
-        parallel(intake.collect(), feeder.feedOnceReady { shooter.atTarget }),
+        sequential(
+            waitUntil { shooter.atTarget },
+            parallel(intake.collect(), feeder.feedOnceReady { true }),
+        ),
     )
 
     override fun onLoop() {

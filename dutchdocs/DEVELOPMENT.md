@@ -291,7 +291,7 @@ Season mechanisms live in `subsystems/` next to the drive: `IntakeSubsystem`,
 still an unconfigured skeleton** — its `init` fails explicitly.
 - Hardware names: intake `intake`, feeder `feeder`, flywheel `up` / `down`
   (`RobotConfig`). All are goBILDA 5203 1620 RPM. SDK directions for this robot's
-  mounting: intake REVERSE, feeder FORWARD, `up` FORWARD, `down` REVERSE.
+  mounting: intake FORWARD, feeder FORWARD, `up` FORWARD, `down` REVERSE.
   Verify at low power before the first full-speed run.
 - The two flywheel motors are synchronized, so only `up`'s encoder
   (`RobotConfig.Shooter.FEEDBACK_MOTOR`) is read and both get the same power.
@@ -313,7 +313,8 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   is continuous. No reverse for now.
 - "Competition" (`opmodes/CompetitionTeleOp.kt`): driver R1/L1 hold
   collect/eject; operator Cross toggles the flywheel, dpad up/down picks
-  far/near, R2 (hold) shoots — intake and feeder together.
+  far/near, R2 (hold) shoots — wait for the flywheel to reach speed once,
+  then run intake and feeder together without pausing until released.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
   `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted
