@@ -66,6 +66,12 @@ object RobotConfig {
         const val SINGLE_MOTOR = "shoot"
     }
 
+    /** Mirrored shovel servos. */
+    object Shovel {
+        const val LEFT_SERVO = "left"
+        const val RIGHT_SERVO = "right"
+    }
+
     /** BIOBUZZ period lengths and milestones measured from teleop start. */
     object Match {
         const val AUTO_NANOS = 30_000_000_000L

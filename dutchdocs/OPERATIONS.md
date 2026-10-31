@@ -28,6 +28,29 @@ init (Preflight lists what's missing); a *swapped* name shows up in step 2.
 motors `up` / `down`. Connect the flywheel feedback encoder to `up`.
 The standalone "Shooter Test" still uses `shoot`.
 
+## Shovel position capture
+
+Use Diagnostics → **Shovel Position Test**, with positional goBILDA 25-2
+servos named `left` and `right`. No drivetrain or Pinpoint is required.
+The diagnostic uses left REVERSE, right FORWARD and a 500–2500 µs PWM range;
+reuse those settings with the captured logical positions later.
+
+- INIT and START do not command a position. Initial targets are **0.5000**,
+  not a reading of the physical position. Before the first application,
+  check clearance or disconnect the linkages to establish a safe reference.
+- After START, **hold L1** on gamepad 1 to apply the target positions.
+  Release L1 to disable PWM on these two ports.
+- Dpad **left/right** decreases/increases the left target; **down/up**
+  decreases/increases the right target. Default step is 0.005; hold **R1**
+  for a 0.001 step. Targets and step are also editable in Panels under
+  `ShovelCalibrationConfig`. Dpad adjustments also work during INIT.
+- Visually verify each physical position while holding L1, then **Cross**
+  captures raised, **Circle** captures down 60, **Square** captures down 70.
+  These names label your measurements; no servo-angle feedback is read.
+- Copy all three left/right pairs from telemetry before STOP. The captures
+  are also written as `SHOVEL CAPTURE` events in the WPILOG. They do not
+  automatically become competition presets or survive a new run in the UI.
+
 ## 2. Motor directions (on blocks)
 
 Use AutoTune's **Mecanum Tuner** (below). Positive power must
