@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.subsystems
 
 import com.bylazar.configurables.annotations.Configurable
 import com.pedropathing.ivy.Command
+import com.pedropathing.ivy.commands.Commands.infinite
 import com.qualcomm.robotcore.hardware.DcMotor
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.DcMotorSimple
@@ -37,6 +38,12 @@ class FeederSubsystem : SubsystemBase("Feeder") {
     override fun writeHardware() {
         motors.forEach { it.power = power }
     }
+
+    /** Runs backwards until interrupted to eject balls through the intake. */
+    fun eject(): Command = logged(
+        "Feeder eject",
+        infinite { power = FeederConfig.ejectPower }.requiring(this).setEnd { power = 0.0 },
+    )
 
     /** Low-power assist while intaking, then a delayed reverse pulse after release. */
     fun intakeAssist(intaking: () -> Boolean, clock: Clock = Clock.SYSTEM): Command {
@@ -116,8 +123,9 @@ class FeederSubsystem : SubsystemBase("Feeder") {
 /** Feeder power, live-editable in Panels. */
 @Configurable
 object FeederConfig {
+    @JvmField var ejectPower = -1.0
     @JvmField var feedPower = 1.0
-    @JvmField var intakePower = 0.2
+    @JvmField var intakePower = 1.0
     @JvmField var intakeReleaseDelayMs = 200.0
     @JvmField var intakeReversePower = -0.2
     @JvmField var intakeReverseMs = 150.0

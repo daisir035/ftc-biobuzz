@@ -1,25 +1,18 @@
 package org.firstinspires.ftc.teamcode
 
 /**
- * Central list of hardware-map names, wiring-level knobs, and season constants.
+ * Mechanism hardware-map names, wiring-level knobs, and season constants.
  *
  * This file holds the names the robot's active "Configuration" on the
  * Driver Station must use. Everything in [org.firstinspires.ftc.teamcode
  * .pedro.Constants] is physical (motor directions, pod offsets, Foresight
  * tuning); everything here is identity (what's this device called in the
- * config xml).
+ * config xml). Drivetrain names live directly in Pedro's drivetrainConfig.
  *
  * Changing a name here must be matched on the Robot Controller's
  * "Configure Robot" screen — there is no runtime magic.
  */
 object RobotConfig {
-
-    object Drive {
-        const val FRONT_LEFT_MOTOR = "FL"
-        const val FRONT_RIGHT_MOTOR = "FR"
-        const val BACK_LEFT_MOTOR = "BL"
-        const val BACK_RIGHT_MOTOR = "BR"
-    }
 
     object Localization {
         /** Hardware-map name of the GoBilda Pinpoint. */

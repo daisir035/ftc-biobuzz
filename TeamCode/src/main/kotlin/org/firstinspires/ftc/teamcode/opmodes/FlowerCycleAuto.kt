@@ -42,6 +42,7 @@ open class FlowerCycleAutoRed : OpModeBase() {
     private lateinit var shooter: ShooterSubsystem
     private lateinit var shovel: ShovelSubsystem
     private var shovelLowered = false
+    private var pathFailed = false
     private var startDelaySec = 0
     private var routine: Command? = null
     private var waitingToStart = false
@@ -55,36 +56,37 @@ open class FlowerCycleAutoRed : OpModeBase() {
     // Set pathsConfigured to false while replacing an incomplete route to refuse START.
     protected open val pathsConfigured = true
     protected val poses get() = alliance.poses()
-    protected open val start get() = poses.of(56.0, 8.0, -90.0)
-    protected open val firstFlower get() = poses.of(9.7698, 46.05, 180.0)
-    protected open val farShot get() = poses.of(61.0083, 133.8026, 90.0)
-    protected open val secondFlower get() = poses.of(46.7669, 131.9023, 90.0)
-    protected open val homeShot get() = poses.of(61.3271, 133.0142, 90.0)
+    protected open val start get() = poses.of(57.3401, 7.4974, -90.0)
+    protected open val firstFlower get() = poses.of(23.3387, 42.5526, 180.0)
+    protected open val farShot get() = poses.of(66.0339, 115.8782, 90.0)
+    protected open val secondFlower get() = poses.of(55.782, 112.4703, 90.0)
+    protected open val homeShot get() = poses.of(65.18, 116.5975, 90.0)
 
     protected open fun toFirstFlower(): Path = curve(
         start,
-        poses.of(31.9419, 57.9825, 0.0),
+        poses.of(37.805, 49.4391, 0.0),
         firstFlower,
     ).linear(start, firstFlower)
 
     protected open fun toFarShot(): Path = curve(
         firstFlower,
-        poses.of(30.7763, 46.326, 0.0),
-        poses.of(4.8116, 141.5, 0.0),
-        poses.of(69.5153, 89.731, 0.0),
+        poses.of(44.1777, 64.5854, 0.0),
+        poses.of(0.9587, 90.9097, 0.0),
+        poses.of(31.6563, 124.5746, 0.0),
+        poses.of(69.5067, 96.8234, 0.0),
         farShot,
     ).linear(firstFlower, farShot)
 
     protected open fun toSecondFlower(): Path = curve(
         farShot,
-        poses.of(61.2944, 93.3918, 0.0),
+        poses.of(62.4671, 100.26, 0.0),
         poses.of(45.2203, 99.5701, 0.0),
         secondFlower,
     ).linear(farShot, secondFlower)
 
     protected open fun toHomeShot(): Path = curve(
         secondFlower,
-        poses.of(54.8783, 78.0983, 0.0),
+        poses.of(55.5484, 86.4742, 0.0),
         homeShot,
     ).linear(secondFlower, homeShot)
     // ---- END USER PATH SECTION ----------------------------------------------
@@ -119,20 +121,21 @@ open class FlowerCycleAutoRed : OpModeBase() {
 
     private fun buildRoutine(): Command {
         check(pathsConfigured) { "Draw the Flower Cycle poses and four paths before running" }
+        pathFailed = false
         var driveOwned = false
         val steps = race(
             sequential(
                 logged("Start delay", monotonicWaitMs(startDelaySec * 1000.0, robot.clock)),
                 shootAt("Preload shot", start, { ShooterConfig.nearRpm }, FlowerCycleConfig.preloadFeedMs, null),
-                logged("Lower shovels", instant { shovelLowered = true }),
-                logged("Shovel settling", monotonicWaitMs(FlowerCycleConfig.shovelSettleMs, robot.clock)),
-                collectAt("First FLOWER", toFirstFlower(), FlowerCycleConfig.firstCollectMs),
+                collectAt("First FLOWER", toFirstFlower(), FlowerCycleConfig.firstCollectMs,
+                    FlowerCycleConfig.shovelLowerDelayMs),
                 shootAt("Far shot", farShot, { ShooterConfig.farRpm }, FlowerCycleConfig.farFeedMs, toFarShot()),
-                collectAt("Second FLOWER", toSecondFlower(), FlowerCycleConfig.secondCollectMs),
+                collectAt("Second FLOWER", toSecondFlower(), FlowerCycleConfig.secondCollectMs, 0.0),
                 shootAt("Return shot", homeShot, { ShooterConfig.farRpm }, FlowerCycleConfig.homeFeedMs, toHomeShot()),
                 instant { robot.recordEvent("AUTO: Flower Cycle complete") },
             ),
             logged("Routine time limit", monotonicWaitMs(29_000.0, robot.clock)),
+            logged("Stop routine after path failure", waitUntil { pathFailed }),
         )
         return logged(
             "Flower Cycle routine",
@@ -153,17 +156,51 @@ open class FlowerCycleAutoRed : OpModeBase() {
         )
     }
 
-    private fun followPath(name: String, path: Path): Command = race(
-        drive.followCommand(path, holdEnd = true, name = name),
-        logged("$name time limit", monotonicWaitMs(FlowerCycleConfig.pathTimeoutMs, robot.clock)),
-    )
+    private fun followPath(name: String, path: Path): Command {
+        var timedOut = false
+        return sequential(
+            instant { timedOut = false },
+            race(
+                drive.followCommand(path, holdEnd = true, name = name),
+                logged(
+                    "$name time limit",
+                    sequential(
+                        monotonicWaitMs(FlowerCycleConfig.pathTimeoutMs, robot.clock),
+                        instant { timedOut = true },
+                    ),
+                ),
+            ),
+            logged("$name check timeout", instant {
+                if (timedOut && !drive.atPose(path.endPose())) {
+                    pathFailed = true
+                    drive.stop()
+                    robot.recordEvent("AUTO ABORTED: $name timed out before arrival at ${drive.pose}")
+                }
+            }),
+        )
+    }
 
     /** Collect during travel, then dwell at the FLOWER. Cancelling the assist prevents a reverse pulse. */
-    private fun collectAt(name: String, path: Path, collectMs: Double): Command = logged(
+    private fun collectAt(name: String, path: Path, collectMs: Double, lowerDelayMs: Double): Command = logged(
         "$name collection",
         deadline(
             sequential(
-                followPath("Drive to $name", path),
+                deadline(
+                    followPath("Drive to $name", path),
+                    logged(
+                        "$name lower shovels after wall clearance",
+                        sequential(
+                            monotonicWaitMs(lowerDelayMs, robot.clock),
+                            waitUntil {
+                                val pose = drive.pose
+                                val length = RobotConfig.Field.LENGTH_INCHES
+                                minOf(pose.x(), pose.y(), length - pose.x(), length - pose.y()) >=
+                                    FlowerCycleConfig.shovelWallClearanceInches
+                            },
+                            instant { shovelLowered = true },
+                        ),
+                    ),
+                ),
                 logged("$name intake dwell", monotonicWaitMs(collectMs, robot.clock)),
             ),
             intake.collect(),
@@ -177,6 +214,13 @@ open class FlowerCycleAutoRed : OpModeBase() {
         var warmup = false
         val travel = if (approach == null) instant {} else deadline(
             followPath("Drive to $name", approach),
+            logged(
+                "$name raise shovels after departure",
+                sequential(
+                    monotonicWaitMs(FlowerCycleConfig.shovelRaiseDelayMs, robot.clock),
+                    instant { shovelLowered = false },
+                ),
+            ),
             sequential(
                 waitUntil { drive.pathProgress() >= FlowerCycleConfig.spinUpProgress },
                 instant {
@@ -192,6 +236,8 @@ open class FlowerCycleAutoRed : OpModeBase() {
                 deadline(
                     sequential(
                         travel,
+                        // Also retract on arrival if this approach took less than the delay.
+                        logged("$name raise shovels on arrival", instant { shovelLowered = false }),
                         // A very short path can end between samples before the marker is seen.
                         instant { warmup = true },
                         drive.holdCommand(target, FlowerCycleConfig.settleTimeoutMs, "$name settle"),
@@ -294,9 +340,11 @@ object FlowerCycleConfig {
     @JvmField var preloadFeedMs = 1500.0
     @JvmField var farFeedMs = 1500.0
     @JvmField var homeFeedMs = 1500.0
-    @JvmField var firstCollectMs = 700.0
-    @JvmField var secondCollectMs = 700.0
-    @JvmField var shovelSettleMs = 300.0
+    @JvmField var firstCollectMs = 1000.0
+    @JvmField var secondCollectMs = 1000.0
+    @JvmField var shovelLowerDelayMs = 1000.0
+    @JvmField var shovelRaiseDelayMs = 500.0
+    @JvmField var shovelWallClearanceInches = 18.0
     @JvmField var spinUpProgress = 0.7
     @JvmField var pathTimeoutMs = 5000.0
     @JvmField var settleTimeoutMs = 1000.0

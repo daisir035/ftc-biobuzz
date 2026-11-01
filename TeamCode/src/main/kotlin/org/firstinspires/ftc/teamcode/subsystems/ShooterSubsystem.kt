@@ -178,21 +178,21 @@ object ShooterConfig {
     @JvmField var targetRpm = 1400.0
 
     /** Match presets (motor output RPM), chosen on the operator's dpad. Placeholders until shots are tested. */
-    @JvmField var nearRpm = 720.0
+    @JvmField var nearRpm = 690.0
     @JvmField var farRpm = 1500.0
 
     /** |measured − target| at or under this counts as [ShooterSubsystem.atTarget]. */
-    @JvmField var speedToleranceRpm = 60.0
+    @JvmField var speedToleranceRpm = 20.0
 
     /**
      * Feedforward, power per RPM at [nominalVolts]. Start: 1 / 1620 (free
      * speed at 12 V); raise it until the flywheel settles near target with
      * kP = kI = 0, then add kP.
      */
-    @JvmField var kF = 0.00062
+    @JvmField var kF = 0.0011
 
     /** Power per RPM of error. */
-    @JvmField var kP = 0.02
+    @JvmField var kP = 0.01
     @JvmField var kI = 0.0
     @JvmField var kD = 0.0
 

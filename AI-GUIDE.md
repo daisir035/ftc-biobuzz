@@ -201,6 +201,9 @@ Verified 3.0.1 behaviour to respect:
 
 Configuration lives in `pedro/Constants.java` in AutoTune's layout
 (`drivetrainConfig`, `localizerConfig`, `foresightConfig`, `create()`).
+Drivetrain motor names are literal strings in `drivetrainConfig`, matching
+AutoTune's output. Preflight and motor logging read that config; do not add
+a second set of drivetrain name constants in `RobotConfig`.
 Pedro 3 has no voltage compensation for mecanum, so the drivetrain is
 `pedro/VoltageCompensatedMecanum.java`: every follower power (paths, holds,
 turns; not manual driving) is scaled by `Constants.NOMINAL_VOLTS` / the smoothed Control Hub voltage, and
@@ -212,7 +215,11 @@ re-tune after drivetrain, weight, or nominal-voltage changes. With
 `FORESIGHT_TUNED` false the follower has no algorithm, manual driving works,
 and path, hold and turn commands throw at start. AutoTune procedures in
 `pedro/procedures/` are
-copied unmodified from Pedro-Pathing/Quickstart b4312385; `pedro/Tuning.java`
+copied unmodified from Pedro-Pathing/Quickstart b4312385, except `PinpointTuner.java`,
+copied byte-for-byte from `daisir035/Quickstart` (direction fix `3494d7a`). That fix
+caches direction readings before Stop instead of consulting a reset pose afterward.
+Use official/team-fork procedures as supplied; do not invent local calibration workflows.
+`pedro/Tuning.java`
 registers the Mecanum, Pinpoint, Foresight and Tests procedures.
 
 ## Drive commands
@@ -306,6 +313,10 @@ drive.pose / drive.velocity / drive.atPose(target) / drive.toggleFieldCentric()
    is written, not recalibrated: `Constants` sets Pedro's Pinpoint
    `ResetMode.NONE`, so the IMU keeps its power-up calibration and INIT has
    no stationary requirement. No pose is restored from a previous op-mode.
+   Runtime and configured AutoTune Foresight/Tests construct through
+   `Constants.createLocalizer`, which enforces NONE even if a pasted config omits it.
+   Raw Pinpoint identification uses its official/team-fork initialization unchanged;
+   its zero offsets and FORWARD baseline are for measurement, not robot defaults.
 9. **Shutdown.** `Robot.stop()` stops every subsystem first, then runs the
    crash-report callback, clears Ivy without end handlers (so cleanup cannot
    re-energize hardware), closes the recorder (the last logged pose is the
@@ -437,7 +448,8 @@ No team or season prefix. `"Match"` or `"Diagnostics"` groups. Title Case, no
 - Don't move files between `java/` and `kotlin/` source roots.
 - Don't bump FTC SDK, Pedro, Ivy, Kotlin, AGP, Sloth or Panels versions.
   When asked to, work through **Library workarounds** as part of the bump.
-- Don't edit the copied AutoTune procedures; re-copy them from the Quickstart.
+- Don't edit the copied AutoTune procedures; copy from official Quickstart or the
+  user's `daisir035/Quickstart` fork and record the source commit when updating.
 - Don't add wrappers, DSLs or aliases over Ivy or Pedro APIs. `logged` is the
   single sanctioned command wrapper; don't grow it into a framework.
 - Don't invent game-specific mechanisms or put season code in `core/`.

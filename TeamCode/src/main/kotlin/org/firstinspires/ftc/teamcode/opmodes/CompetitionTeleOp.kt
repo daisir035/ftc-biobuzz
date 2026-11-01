@@ -25,7 +25,7 @@ import org.firstinspires.ftc.teamcode.subsystems.ShovelSubsystem
  * Driver (gamepad1), on top of [TeleOpBase]'s drive controls:
  *  - **R1** (hold) — intake collect with low-power feeder assist; release
  *    stops the intake and gives the feeder a delayed reverse pulse
- *  - **L1** (hold) — intake eject
+ *  - **L1** (hold) — intake and feeder eject
  *
  *  - **Cross** — flywheel on/off at the selected preset
  *  - **dpad up / down** — far / near preset ([ShooterConfig.farRpm] / [ShooterConfig.nearRpm])
@@ -75,7 +75,7 @@ class CompetitionTeleOp : TeleOpBase() {
 
         driver.button(Button.R1).whileTrue(intake.collect())
             .onTrue(feeder.intakeAssist(intaking = { driver.held(Button.R1) }))
-        driver.button(Button.L1).whileTrue(intake.eject())
+        driver.button(Button.L1).whileTrue(parallel(intake.eject(), feeder.eject()))
 
         driver.button(Button.CROSS).toggleOnTrue(shooter.spinUp { presetRpm })
         driver.button(Button.DPAD_UP).onTrue(instant { preset = Preset.FAR })

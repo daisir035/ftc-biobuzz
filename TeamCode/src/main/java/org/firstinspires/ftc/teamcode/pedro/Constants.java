@@ -16,14 +16,13 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import java.util.function.DoubleSupplier;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
-import org.firstinspires.ftc.teamcode.RobotConfig;
 import org.firstinspires.ftc.teamcode.subsystems.DriveConfig;
 
 /**
  * Pedro Pathing 3 constants for this robot, in the layout AutoTune generates
  * (https://pedropathing.com/docs/pathing/tuning/constants). Paste AutoTune's
- * Java output over the matching block; keep the hardware names pointing at
- * {@link RobotConfig}.
+ * Java output over the matching block. Drivetrain hardware names live here;
+ * preflight checks and motor logging read this same configuration.
  *
  * <p>Provenance of every value:
  * <ul>
@@ -62,10 +61,10 @@ public final class Constants {
     public static final double NOMINAL_VOLTS = 12.0;
 
     public static final MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
-        c.frontLeftName.set(RobotConfig.Drive.FRONT_LEFT_MOTOR);
-        c.backLeftName.set(RobotConfig.Drive.BACK_LEFT_MOTOR);
-        c.frontRightName.set(RobotConfig.Drive.FRONT_RIGHT_MOTOR);
-        c.backRightName.set(RobotConfig.Drive.BACK_RIGHT_MOTOR);
+        c.frontLeftName.set("FL");
+        c.frontRightName.set("FR");
+        c.backLeftName.set("BL");
+        c.backRightName.set("BR");
 
         c.frontLeftDirection.set(DcMotorSimple.Direction.REVERSE);
         c.frontRightDirection.set(DcMotorSimple.Direction.FORWARD);
@@ -73,51 +72,47 @@ public final class Constants {
         c.backRightDirection.set(DcMotorSimple.Direction.FORWARD);
     });
 
-    public static final PinpointConfig localizerConfig = new PinpointConfig(c -> {
-        c.name.set(RobotConfig.Localization.PINPOINT);
-        // Pinpoint Tuner output, run on this robot. Re-run and re-paste after
-        // moving the pod assembly.
-        c.xPodOffset.set(1.4569476270300197);
-        c.yPodOffset.set(-0.9436713241216704);
-        c.offsetUnits.set(DistanceUnit.INCH);
-        c.globalDistanceUnit.set(DistanceUnit.INCH);
-        // X REVERSED: the pod assembly faces backward. The Pinpoint Tuner's
-        // FORWARD suggestion read the X pod with the wrong sign on this robot;
-        // confirmed by pushing the robot and watching the Panels field view.
-        c.xPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
-        c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.FORWARD);
+    public static PinpointConfig localizerConfig = new PinpointConfig(c -> {
+        // Latest measured offsets. Both directions confirmed REVERSED by the user's
+        // 2026-11-01 re-run of the Pinpoint Tuner and the Drive Only push test.
+        c.name.set("pinpoint");
         c.podType.set(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
-        // No device command at construction. LocalizerSubsystem writes the start
-        // pose at every INIT instead. RECALIBRATE_IMU (Pedro's default) and
-        // RESET_AND_RECALIBRATE_IMU would recalibrate the gyro every run, which
-        // needs a stationary robot for ~0.25 s and is not needed to zero the pose.
+        c.xPodOffset.set(1.733931744192529);
+        c.yPodOffset.set(3.517399585153174);
+        c.xPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
+        c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
+        c.globalDistanceUnit.set(DistanceUnit.INCH);
+        c.offsetUnits.set(DistanceUnit.INCH);
         c.resetMode.set(PinpointLocalizer.ResetMode.NONE);
     });
 
+
     /** AutoTune's Foresight procedure output, pasted verbatim. */
-    public static final ForesightConfig foresightConfig = new ForesightConfig(c -> {
-        Controller primaryTranslationalForward = Controller.proportional(0.15325564047848608);
-        Controller secondaryTranslationalForward = Controller.proportional(0.05662386409066711);
-        Controller primaryTranslationalLateral = Controller.proportional(0.24534267817422847);
-        Controller secondaryTranslationalLateral = Controller.proportional(0.09064756390827897);
+    public static ForesightConfig foresightConfig = new ForesightConfig(
+            c -> {
+                Controller primaryTranslationalForward = Controller.proportional(0.3149776271663011);
+                Controller secondaryTranslationalForward = Controller.proportional(0.11637581688074408);
+                Controller primaryTranslationalLateral = Controller.proportional(0.4802387111841137);
+                Controller secondaryTranslationalLateral = Controller.proportional(0.17743537156783293);
 
-        c.forwardTranslational.set(Controller.piecewise(secondaryTranslationalForward).put(2.5, primaryTranslationalForward));
-        c.strafeTranslational.set(Controller.piecewise(secondaryTranslationalLateral).put(2.5, primaryTranslationalLateral));
+                c.forwardTranslational.set(Controller.piecewise(secondaryTranslationalForward).put(2.5, primaryTranslationalForward));
+                c.strafeTranslational.set(Controller.piecewise(secondaryTranslationalLateral).put(2.5, primaryTranslationalLateral));
 
-        c.coast.set(Controller.proportionalFeedforward(0.018564902717508547));
-        c.brake.set(Controller.proportionalFeedforward(0.015780167309882263));
+                c.coast.set(Controller.proportionalFeedforward(0.014597226061475232));
+                c.brake.set(Controller.proportionalFeedforward(0.012407642152253947));
 
-        c.headingFeedback.set(Controller.proportional(1.5988025611530874));
-        c.headingBrakeCoefficients.set(Vector2D.cartesian(0.02260860499841661, 0.010232454306551413));
+                c.headingFeedback.set(Controller.proportional(5.047861924311455));
+                c.headingBrakeCoefficients.set(Vector2D.cartesian(0.05866924639208644, 0.003280217577239187));
 
-        c.linearBrakeCoefficients.set(Matrix.diag(0.03690990258732756, -0.006698982990924054));
-        c.quadraticBrakeCoefficients.set(Matrix.diag(0.002431382843941635, 0.0034439014976842437));
+                c.linearBrakeCoefficients.set(Matrix.diag(0.11223205639513174, 0.06518828391149664));
+                c.quadraticBrakeCoefficients.set(Matrix.diag(9.198632343122721E-4, 0.0015564455133477472));
 
-        c.maxAchievableForwardVelocity.set(57.37232242800095);
-        c.maxAchievableStrafeVelocity.set(49.99157880573599);
-        c.naturalForwardDeceleration.set(61.98385527089174);
-        c.naturalStrafeDeceleration.set(83.19735660411557);
-    });
+                c.maxAchievableForwardVelocity.set(80.77620101715345);
+                c.maxAchievableStrafeVelocity.set(63.93016612200878);
+                c.naturalForwardDeceleration.set(33.11195066325026);
+                c.naturalStrafeDeceleration.set(66.0621890115333);
+            }
+    );
 
     /**
      * Builds the follower: Pinpoint localizer, mecanum drivetrain, and Foresight
@@ -132,7 +127,7 @@ public final class Constants {
     public static Follower create(HardwareMap hardwareMap, DoubleSupplier batteryVolts) {
         drivetrainConfig.manualBrakeMode.set(DriveConfig.brakeOnTeleop);
         return new Follower(
-                new PinpointLocalizer(hardwareMap, localizerConfig),
+                createLocalizer(hardwareMap, localizerConfig),
                 drivetrain(hardwareMap, batteryVolts),
                 FORESIGHT_TUNED ? new Foresight(foresightConfig) : null
         );
@@ -141,4 +136,11 @@ public final class Constants {
     public static VoltageCompensatedMecanum drivetrain(HardwareMap hardwareMap, DoubleSupplier batteryVolts) {
         return new VoltageCompensatedMecanum(hardwareMap, drivetrainConfig, NOMINAL_VOLTS, batteryVolts);
     }
+
+    /** Shared by runtime and AutoTune; a pasted config must never re-enable IMU recalibration. */
+    public static PinpointLocalizer createLocalizer(HardwareMap hardwareMap, PinpointConfig config) {
+        config.resetMode.set(PinpointLocalizer.ResetMode.NONE);
+        return new PinpointLocalizer(hardwareMap, config);
+    }
+
 }

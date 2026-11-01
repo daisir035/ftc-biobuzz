@@ -7,6 +7,8 @@ import org.firstinspires.ftc.teamcode.core.Robot
 import org.firstinspires.ftc.teamcode.core.sim.ConfigSnapshot
 import org.firstinspires.ftc.teamcode.core.sim.FakeHardwareMap
 import org.firstinspires.ftc.teamcode.core.sim.MotorProbe
+import org.firstinspires.ftc.teamcode.subsystems.FeederConfig
+import org.firstinspires.ftc.teamcode.subsystems.IntakeConfig
 import org.firstinspires.ftc.teamcode.subsystems.ShooterConfig
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 import org.firstinspires.ftc.teamcode.subsystems.ShovelConfig
@@ -55,6 +57,28 @@ class SingleDriverCompetitionTest {
     private fun tick() = robot.loop(input = { driver.update(); operator.update() })
 
     @Test
+    fun ejectReversesIntakeAndFeederAndReleaseStopsBoth() {
+        driver.raw.right_bumper = true
+        tick()
+        assertEquals(FeederConfig.intakePower, feeder.power, 0.0)
+
+        driver.raw.left_bumper = true
+        tick()
+        assertEquals(IntakeConfig.ejectPower, intake.power, 0.0)
+        assertTrue(feeder.power < 0.0)
+
+        driver.raw.right_bumper = false
+        repeat(4) { tick() }
+        assertEquals(IntakeConfig.ejectPower, intake.power, 0.0)
+        assertTrue(feeder.power < 0.0)
+
+        driver.raw.left_bumper = false
+        tick()
+        assertEquals(0.0, intake.power, 0.0)
+        assertEquals(0.0, feeder.power, 0.0)
+    }
+
+    @Test
     fun gamepadOneControlsShooterPresetsFiringAndBothShovelPositions() {
         ShooterConfig.nearRpm = 1200.0
         ShooterConfig.farRpm = 1500.0
@@ -74,7 +98,7 @@ class SingleDriverCompetitionTest {
         driver.raw.right_trigger = 1.0f
         repeat(4) { tick() }
         assertEquals(1.0, intake.power, 0.0)
-        assertEquals(1.0, feeder.power, 0.0)
+        assertEquals(FeederConfig.feedPower, feeder.power, 0.0)
         driver.raw.right_trigger = 0.0f
         tick()
         assertEquals(0.0, intake.power, 0.0)
@@ -116,7 +140,7 @@ class SingleDriverCompetitionTest {
         up.velocity = 2076.0 // 1200 RPM at 103.8 ticks/rev.
         repeat(4) { tick() }
         assertEquals(1.0, intake.power, 0.0)
-        assertEquals(1.0, feeder.power, 0.0)
+        assertEquals(FeederConfig.feedPower, feeder.power, 0.0)
 
         driver.raw.right_trigger = 0.0f
         tick()

@@ -69,7 +69,6 @@ class FlowerCycleAutoTest {
         FlowerCycleConfig.homeFeedMs = 100.0
         FlowerCycleConfig.firstCollectMs = 100.0
         FlowerCycleConfig.secondCollectMs = 100.0
-        FlowerCycleConfig.shovelSettleMs = 100.0
         FlowerCycleConfig.readyTimeoutMs = 300.0
         FlowerCycleConfig.settleTimeoutMs = 100.0
         FlowerCycleConfig.pathTimeoutMs = 2000.0
@@ -109,6 +108,8 @@ class FlowerCycleAutoTest {
     }
 
     private fun measuredRpm(rpm: Double) { up.velocity = rpm * 103.8 / 60.0 }
+    private fun shovelLowered() = FlowerCycleAutoRed::class.java.getDeclaredField("shovelLowered")
+        .apply { isAccessible = true }.getBoolean(auto)
     private fun place(x: Double, y: Double) { hardware.localizer.measuredPose = Pose(x, y, 0.0) }
     private fun assertStopped() {
         assertNull(shooter.targetRpm)
@@ -177,11 +178,20 @@ class FlowerCycleAutoTest {
         until { hardware.drive.isFollowing && intakeMotor.power == IntakeConfig.collectPower }
         assertEquals(IntakeConfig.collectPower, intakeMotor.power, 0.0)
         assertEquals(FeederConfig.intakePower, feederMotor.power, 0.0)
-        assertTrue(FlowerCycleAutoRed::class.java.getDeclaredField("shovelLowered")
-            .apply { isAccessible = true }.getBoolean(auto))
+        assertFalse(shovelLowered())
+        tick(45)
+        assertFalse(shovelLowered())
+        place(18.0, 24.0)
+        tick(10)
+        assertTrue(shovelLowered())
         place(24.0, 0.0)
         until { !hardware.drive.isFollowing }
         until { hardware.drive.isFollowing }
+        assertTrue(shovelLowered())
+        tick(45)
+        assertTrue(shovelLowered())
+        tick(10)
+        assertFalse(shovelLowered())
         measuredRpm(1400.0)
         place(24.0, 24.0)
         until { feederMotor.power == FeederConfig.feedPower }
@@ -195,9 +205,89 @@ class FlowerCycleAutoTest {
         place(0.0, 0.0)
         until { feederMotor.power == FeederConfig.feedPower }
         assertEquals(1400.0, shooter.targetRpm!!, 0.0)
+        assertFalse(shovelLowered())
         until { !Scheduler.isScheduled(routine) }
         tick()
         assertStopped()
+    }
+
+    @Test fun realRouteInterpolatesHeadingDuringTheFirstTwoPaths() {
+        val route = FlowerCycleAutoRed()
+        for ((method, headings) in listOf(
+            "toFirstFlower" to doubleArrayOf(270.0, 180.0),
+            "toFarShot" to doubleArrayOf(180.0, 90.0),
+            "toSecondFlower" to doubleArrayOf(90.0, 90.0),
+            "toHomeShot" to doubleArrayOf(90.0, 90.0),
+        )) {
+            val path = FlowerCycleAutoRed::class.java.getDeclaredMethod(method)
+                .apply { isAccessible = true }.invoke(route) as Path
+            val start = Math.toRadians(headings[0])
+            val end = Math.toRadians(headings[1])
+            assertEquals(start, path.heading(0.0), 1e-6)
+            assertEquals(end, path.heading(1.0), 1e-6)
+            if (start != end) {
+                // Curve parameter t is not distance fraction; heading is linear in distance.
+                assertTrue(path.heading(0.5) < start && path.heading(0.5) > end)
+            } else {
+                assertEquals(start, path.heading(0.5), 1e-6)
+            }
+        }
+    }
+
+    @Test fun realFirstPathProducesTurningPowerBeforeItsEndpoint() {
+        val path = FlowerCycleAutoRed::class.java.getDeclaredMethod("toFirstFlower")
+            .apply { isAccessible = true }.invoke(FlowerCycleAutoRed()) as Path
+        hardware.localizer.measuredPose = path.get(0.0)
+        Scheduler.schedule(hardware.drive.followCommand(path))
+        tick(3)
+        val midpoint = path.get(0.5)
+        // Simulate driving halfway along the curve without turning yet.
+        hardware.localizer.measuredPose = Pose(midpoint.x(), midpoint.y(), path.heading(0.0))
+        tick(3)
+        assertTrue(hardware.drive.isFollowing)
+        val powers = hardware.powers()
+        val turningPower = (-powers[0] + powers[1] - powers[2] + powers[3]) / 4.0
+        assertTrue("Follower should command a clockwise turn during travel", turningPower < -0.01)
+    }
+
+    @Test fun collectionWaitsForWallClearanceAndCancelledMarkersCannotLowerShovels() {
+        val path = Paths.line(Pose(60.0, 133.0), Pose(60.0, 60.0)).constant(0.0)
+        place(60.0, 133.0)
+        val collection = command("collectAt", "Wall FLOWER", path, 100.0, 0.0)
+        Scheduler.schedule(collection)
+        tick(60)
+        assertFalse(shovelLowered())
+        place(60.0, 124.0)
+        tick(4)
+        assertFalse(shovelLowered())
+        place(60.0, 123.5)
+        tick(4)
+        assertTrue(shovelLowered())
+        Scheduler.cancel(collection)
+
+        inject("shovelLowered", false)
+        place(60.0, 133.0)
+        val cancelled = command("collectAt", "Cancelled FLOWER", path, 100.0, 1000.0)
+        Scheduler.schedule(cancelled)
+        tick(5)
+        Scheduler.cancel(cancelled)
+        place(60.0, 100.0)
+        tick(60)
+        assertFalse(shovelLowered())
+    }
+
+    @Test fun shortFinalApproachRaisesShovelsOnArrivalBeforeShooting() {
+        inject("shovelLowered", true)
+        val target = Pose(24.0, 0.0)
+        val shot = command("shootAt", "Return shot", target, { 1000.0 }, 100.0,
+            Paths.line(Pose.zero(), target).constant(0.0))
+        Scheduler.schedule(shot)
+        until { hardware.drive.isFollowing }
+        assertTrue(shovelLowered())
+        place(24.0, 0.0)
+        measuredRpm(1000.0)
+        until { feederMotor.power > 0.0 }
+        assertFalse(shovelLowered())
     }
 
     @Test fun overallTimeoutStopsAStalledRoutine() {
@@ -207,6 +297,22 @@ class FlowerCycleAutoTest {
         tick(1500)
         assertFalse(Scheduler.isScheduled(routine))
         assertStopped()
+        assertTrue(hardware.powers().all { it == 0.0 })
+    }
+
+    @Test fun pathTimeoutBeforeArrivalStopsTheRoutineInsteadOfDrivingTheNextPath() {
+        FlowerCycleConfig.pathTimeoutMs = 200.0
+        measuredRpm(1000.0)
+        val routine = command("buildRoutine")
+        Scheduler.schedule(routine)
+        until { hardware.drive.isFollowing }
+        // Stay at the start, as if the robot is blocked by a wall.
+        tick(50)
+        assertFalse(Scheduler.isScheduled(routine))
+        assertStopped()
+        assertEquals("IDLE", hardware.drive.driveModeName)
+        assertTrue(hardware.powers().all { it == 0.0 })
+        tick(50)
         assertTrue(hardware.powers().all { it == 0.0 })
     }
 

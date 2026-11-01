@@ -18,11 +18,11 @@ import com.qualcomm.robotcore.hardware.HardwareMap
 import kotlin.math.abs
 import kotlin.math.hypot
 import org.firstinspires.ftc.robotcore.external.navigation.CurrentUnit
-import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 import org.firstinspires.ftc.teamcode.core.logging.logged
+import org.firstinspires.ftc.teamcode.pedro.Constants
 import org.firstinspires.ftc.teamcode.pedro.VoltageCompensatedMecanum
 
 /**
@@ -75,7 +75,7 @@ class MecanumDriveSubsystem(
     private var latchedPathProgress = 0.0
 
     override fun init(hardwareMap: HardwareMap) {
-        motors = MOTOR_NAMES.map { (_, name) ->
+        motors = motorNames.map { (_, name) ->
             try {
                 hardwareMap.tryGet(DcMotorEx::class.java, name)
             } catch (_: Throwable) {
@@ -300,11 +300,19 @@ class MecanumDriveSubsystem(
 
     // ------------------------------------------------------- motor channels
 
-    /** In Pedro's mixer order ([MOTOR_NAMES]); null where the hardware map has no such motor. */
+    /** Pedro's mixer order; hardware names come from the same config as the drivetrain. */
+    private val motorNames = listOf(
+        "leftFront" to Constants.drivetrainConfig.frontLeftName.get(),
+        "rightFront" to Constants.drivetrainConfig.frontRightName.get(),
+        "leftRear" to Constants.drivetrainConfig.backLeftName.get(),
+        "rightRear" to Constants.drivetrainConfig.backRightName.get(),
+    )
+
+    /** Null where the hardware map has no such motor. */
     private var motors: List<DcMotorEx?> = emptyList()
     private val mecanum = follower.drivetrain as? Mecanum
-    private val commandedPower = DoubleArray(MOTOR_NAMES.size)
-    private val wheelVelocity = DoubleArray(MOTOR_NAMES.size) { Double.NaN }
+    private val commandedPower = DoubleArray(motorNames.size)
+    private val wheelVelocity = DoubleArray(motorNames.size) { Double.NaN }
     private var currentSampleIndex = 0
     private var lastCurrentSampleNs = Long.MIN_VALUE
     private var sampledCurrentIndex = -1
@@ -372,7 +380,7 @@ class MecanumDriveSubsystem(
         (follower.drivetrain as? VoltageCompensatedMecanum)?.let { log.put("voltageScale", it.scale()) }
         val index = sampledCurrentIndex
         if (index >= 0) {
-            log.put("motors/${MOTOR_NAMES[index].first}/currentAmps", sampledCurrentAmps)
+            log.put("motors/${motorNames[index].first}/currentAmps", sampledCurrentAmps)
             sampledCurrentIndex = -1
         }
     }
@@ -421,13 +429,6 @@ class MecanumDriveSubsystem(
     }
 
     private companion object {
-        /** Pedro's mixer order, which the `motors/power` and `motors/velocityTps` arrays follow. */
-        val MOTOR_NAMES = listOf(
-            "leftFront" to RobotConfig.Drive.FRONT_LEFT_MOTOR,
-            "rightFront" to RobotConfig.Drive.FRONT_RIGHT_MOTOR,
-            "leftRear" to RobotConfig.Drive.BACK_LEFT_MOTOR,
-            "rightRear" to RobotConfig.Drive.BACK_RIGHT_MOTOR,
-        )
         const val CURRENT_SAMPLE_INTERVAL_NS = 200_000_000L
         /** How long a hold or turn waits for arrival before the routine moves on. */
         const val DEFAULT_TIMEOUT_MS = 2_000.0

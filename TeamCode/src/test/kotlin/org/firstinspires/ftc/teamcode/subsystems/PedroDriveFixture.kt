@@ -11,7 +11,6 @@ import com.pedropathing.math.Pose
 import com.pedropathing.math.Vector2D
 import com.pedropathing.math.Velocity
 import com.pedropathing.revhub.drivetrains.Mecanum
-import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.sim.FakeClock
 import org.firstinspires.ftc.teamcode.core.sim.FakeHardwareMap
 import org.firstinspires.ftc.teamcode.core.sim.MotorProbe
@@ -37,10 +36,10 @@ internal class PedroDriveFixture(
 
     init {
         listOf(
-            RobotConfig.Drive.FRONT_LEFT_MOTOR,
-            RobotConfig.Drive.FRONT_RIGHT_MOTOR,
-            RobotConfig.Drive.BACK_LEFT_MOTOR,
-            RobotConfig.Drive.BACK_RIGHT_MOTOR,
+            Constants.drivetrainConfig.frontLeftName.get(),
+            Constants.drivetrainConfig.frontRightName.get(),
+            Constants.drivetrainConfig.backLeftName.get(),
+            Constants.drivetrainConfig.backRightName.get(),
         ).forEachIndexed { i, name -> hardwareMap.put(name, motors[i].device) }
         follower = Follower(
             localizer,

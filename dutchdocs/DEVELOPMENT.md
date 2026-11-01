@@ -327,24 +327,40 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   `intakeReversePower` (-0.2) for `intakeReverseMs` (150 ms). These settings
   are live in Panels. A new R1 press restarts the intake assist; R2 shooting
   cancels the assist and any pending reverse pulse.
+- "Just Path RED" (`opmodes/JustPathAuto.kt`) tests the latest supplied four-curve
+  route from (57.3401, 7.4974, -90°), with linear heading interpolation. Only the drive,
+  localizer and intake are used. Paths 1 and 3 start intake at 80% progress,
+  collect for 700 ms at the FLOWER, then stop intake before the next path.
+  `JustPathConfig` exposes that progress and dwell in Panels. Cancellation or
+  the 29-second routine timeout also stops intake. No shooter or shovel actions run.
 - "Flower Cycle RED/BLUE" (`opmodes/FlowerCycleAuto.kt`) sequences a preload shot,
-  shovel lowering, first FLOWER collection, far-side shot, second FLOWER collection,
+  first FLOWER collection, far-side shot, second FLOWER collection,
   and a return shot. The `USER PATH SECTION` contains the supplied four-curve RED
-  reference route; its final shot is at (61.3271, 133.0142, 90°), not the starting
+  reference route shared with Just Path RED; its final shot is at (65.18, 116.5975, 90°), not the starting
   pose. `pathsConfigured` is true for this route; set it false while editing an
   incomplete route to refuse START. BLUE uses the same routine through `Alliance.poses()`.
   `FlowerCycleConfig` holds the three feed durations (initially 1500 ms each), two
-  collection dwells (700 ms each), shovel settling wait (300 ms), path/settling/readiness
+  collection dwells (700 ms each), shovel departure delays (1000 ms), wall clearance
+  (18 inches from the robot centre to every wall), path/settling/readiness
   timeouts, and `spinUpProgress` (0.7 = 70% through each shooting approach).
   The flywheel stays on from that marker through arrival and feeding; a missed marker
   falls back to spin-up at approach end. Preload uses `ShooterConfig.nearRpm`;
   both far-side shots use `farRpm` because their supplied shooting points are adjacent.
+  Shovels stay raised through the preload and the first second of the first path,
+  then lower only after clearing the walls. They retract one second after leaving
+  either FLOWER (or on shooting approach arrival if sooner). On the second collection
+  path they lower once the measured pose clears the walls. Arrival at the final shot
+  always retracts them. Markers are cancelled with their path, so they cannot fire later.
+  Path headings interpolate during travel: -90° to 180°, then 180° to 90°;
+  the last two paths keep 90°. Control-point headings do not affect this interpolation.
   Feeding starts only at the measured shooting pose and
   target RPM; an unready shot is skipped after its timeout. Once feeding starts,
   it stays continuous through normal speed dips until that burst's timer ends.
   Collection runs intake and low-power feeder assist during travel and dwell; it
-  does not run the teleop release reverse pulse. Shovels stay lowered after the first
-  burst. The whole routine has a 29-second limit including the selected start delay.
+  does not run the teleop release reverse pulse. A path timeout while outside the
+  endpoint pose tolerance aborts this routine and stops the drive and mechanisms;
+  it never starts the next path from an unconfirmed endpoint. The whole routine
+  has a 29-second limit including the selected start delay.
   Timing defaults are starting guesses, not a validated 30-second match strategy.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in

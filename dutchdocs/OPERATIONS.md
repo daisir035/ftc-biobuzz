@@ -92,6 +92,8 @@ turn each wheel robot-forward. Fix directions in `pedro/Constants.java`
   Localization / Pose** shows the same.
 - If signs or distances are wrong, run AutoTune's **Pinpoint Tuner** and copy
   its output into `localizerConfig`.
+  Current values must be revalidated with the team-fork tuner; neither the old chassis
+  convention nor a temporary direction reversal proves today's encoder directions.
 
 ## 4. Teleop signs and field-centric (on carpet, slow)
 
@@ -127,7 +129,17 @@ With the robot connected, open **http://192.168.43.1:10158**. Procedures
    follower. Line before Curve.
 
 Only values pasted into `pedro/Constants.java` persist. Record the date and
-chassis in a comment next to pasted values. Foresight and Tests drive through
+chassis in a comment next to pasted values. `PinpointTuner.java` is an unchanged
+copy from `daisir035/Quickstart`, including fix `3494d7a`: keep the last direction
+reading before Stop so the reset pose cannot turn every result into FORWARD.
+Follow that procedure's own instructions; there is no custom Cross/arming step.
+It retains the source procedure's measurement validation limits: zero movement
+can still report FORWARD, so move as instructed and independently verify the axes.
+Runtime and configured AutoTune Foresight/Tests use `Constants.createLocalizer`
+to enforce `ResetMode.NONE`, including when pasted config omits the setting.
+Raw Pinpoint identification follows the source procedure's reset policy unchanged.
+
+Foresight and Tests drive through
 `VoltageCompensatedMecanum`, which scales every follower power by
 `NOMINAL_VOLTS` / battery volts, so the tuning holds on any battery; keep
 `NOMINAL_VOLTS` at 12.0 when tuning and don't change it afterwards.
@@ -413,10 +425,9 @@ Record results in `PROGRESS.md`.
 
 **AutoTune and Pedro**
 - [ ] Mecanum Tuner confirms the four motor directions.
-- [ ] Pinpoint Tuner offsets/directions match `localizerConfig`
-      (xPodOffset ≈ 1.4569 in, yPodOffset ≈ −0.9437 in, X REVERSED, Y FORWARD —
-      X direction confirmed by the push test; the Tuner's FORWARD read the X
-      pod with the wrong sign on this robot).
+- [ ] Pinpoint Tuner offsets/directions match `localizerConfig` on the current chassis.
+      Independently confirm forward +X, left +Y at heading zero; rotate in place
+      and check position drift before running a path. Historical signs are not defaults.
 - [ ] Re-run Foresight through voltage compensation with `NOMINAL_VOLTS = 12.0`;
       paste the output and keep `FORESIGHT_TUNED = true`. The preserved values
       predate compensation and must not be treated as validated with it.
