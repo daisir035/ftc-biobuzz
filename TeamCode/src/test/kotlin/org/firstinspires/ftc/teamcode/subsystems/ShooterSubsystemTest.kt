@@ -59,8 +59,8 @@ class ShooterSubsystemTest {
         assertEquals(800.0, shooter.measuredRpm, 1e-9)
         assertEquals(0.7, up.power, 1e-9)
         assertEquals(0.7, down.power, 1e-9)
-        assertEquals(DcMotorSimple.Direction.FORWARD, up.direction)
-        assertEquals(DcMotorSimple.Direction.REVERSE, down.direction)
+        assertEquals(DcMotorSimple.Direction.REVERSE, up.direction)
+        assertEquals(DcMotorSimple.Direction.FORWARD, down.direction)
         assertFalse(shooter.atTarget)
     }
 

@@ -53,7 +53,7 @@ object RobotConfig {
 
     /**
      * Flywheel motors, mechanically synchronized: [UP_MOTOR] launches turning
-     * counter-clockwise, [DOWN_MOTOR] clockwise, seen from each shaft end (see
+     * clockwise, [DOWN_MOTOR] counter-clockwise, seen from each shaft end (see
      * ShooterSubsystem.REVERSED). Only [FEEDBACK_MOTOR]'s encoder closes the loop.
      */
     object Shooter {

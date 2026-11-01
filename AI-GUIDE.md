@@ -421,7 +421,8 @@ overrides `initialAlliance` only. Start delay on dpad in init, as in the example
 ## Naming op-modes
 
 Currently enabled: Competition, Drive Only, Robot Centric Drive, Default Auto RED/BLUE,
-Just Path RED, Vision Test, Duo Shooter Test, Shooter Test, Shovel Position Test,
+Just Path RED, Flower Cycle RED/BLUE (paths must be configured before START),
+Vision Test, Duo Shooter Test, Shooter Test, Shovel Position Test,
 Shovel Angle Test.
 AutoTune is a web page, not a Driver Station op-mode. `opmodes/skeletons/` holds `@Disabled` op-modes; keep them disabled unless the
 user asks.

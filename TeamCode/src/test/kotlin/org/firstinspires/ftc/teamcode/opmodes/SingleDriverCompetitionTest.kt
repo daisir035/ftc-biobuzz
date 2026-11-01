@@ -14,6 +14,7 @@ import org.firstinspires.ftc.teamcode.subsystems.ShovelSubsystem
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -88,6 +89,41 @@ class SingleDriverCompetitionTest {
         driver.raw.square = true
         tick()
         assertEquals(0.0, shovel.offsetDegrees, 0.0)
+    }
+
+    @Test
+    fun rightTriggerStartsTheFlywheelFromRestAndReleaseStopsIt() {
+        ShooterConfig.nearRpm = 1200.0
+        val shooter = robot.subsystems().filterIsInstance<ShooterSubsystem>().single()
+        tick()
+        assertNull(shooter.targetRpm)
+
+        driver.raw.right_trigger = 1.0f
+        repeat(4) { tick() }
+        assertEquals(1200.0, shooter.targetRpm!!, 0.0)
+        assertTrue(up.power > 0.0)
+        assertEquals(0.0, intake.power, 0.0)
+        assertEquals(0.0, feeder.power, 0.0)
+
+        driver.raw.right_trigger = 0.0f
+        tick()
+        assertNull(shooter.targetRpm)
+        assertEquals(0.0, up.power, 0.0)
+
+        driver.raw.right_trigger = 1.0f
+        repeat(4) { tick() }
+        assertEquals(1200.0, shooter.targetRpm!!, 0.0)
+        up.velocity = 2076.0 // 1200 RPM at 103.8 ticks/rev.
+        repeat(4) { tick() }
+        assertEquals(1.0, intake.power, 0.0)
+        assertEquals(1.0, feeder.power, 0.0)
+
+        driver.raw.right_trigger = 0.0f
+        tick()
+        assertNull(shooter.targetRpm)
+        assertEquals(0.0, up.power, 0.0)
+        assertEquals(0.0, intake.power, 0.0)
+        assertEquals(0.0, feeder.power, 0.0)
     }
 
     @Test

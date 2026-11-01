@@ -14,6 +14,7 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterConfig
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -31,7 +32,7 @@ class CompetitionTeleOpTest {
     fun setUp() {
         Scheduler.reset()
         ShooterConfig.ticksPerRev = 103.8
-        ShooterConfig.targetRpm = 1000.0
+        ShooterConfig.nearRpm = 1000.0
         IntakeConfig.collectPower = 1.0
         FeederConfig.feedPower = 1.0
         val hardware = FakeHardwareMap().apply {
@@ -51,7 +52,6 @@ class CompetitionTeleOpTest {
         }
         shot = CompetitionTeleOp::class.java.getDeclaredMethod("shoot")
             .apply { isAccessible = true }.invoke(teleop) as Command
-        Scheduler.schedule(shooter.spinUp())
     }
 
     @After
@@ -90,6 +90,8 @@ class CompetitionTeleOpTest {
         Scheduler.cancel(shot)
         tick()
         assertFeedPower(0.0)
+        assertNull(shooter.targetRpm)
+        assertEquals(0.0, up.power, 0.0)
     }
 
     @Test

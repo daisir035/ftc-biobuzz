@@ -29,8 +29,8 @@ import org.firstinspires.ftc.teamcode.subsystems.ShovelSubsystem
  *
  *  - **Cross** — flywheel on/off at the selected preset
  *  - **dpad up / down** — far / near preset ([ShooterConfig.farRpm] / [ShooterConfig.nearRpm])
- *  - **R2** (hold) — shoot: intake and feeder wait until the flywheel first
- *    reaches speed, then run without pausing until released
+ *  - **R2** (hold) — spin up the flywheel and shoot once at speed;
+ *    release stops the flywheel, intake and feeder
  *  - **L2** (hold) — precision driving
  *  - **Square** — switch shovels between the 0° and 125° working presets
  *
@@ -86,9 +86,12 @@ class CompetitionTeleOp : TeleOpBase() {
 
     private fun shoot(): Command = logged(
         "Shoot",
-        sequential(
-            waitUntil { shooter.atTarget },
-            parallel(intake.collect(), feeder.feedOnceReady { true }),
+        parallel(
+            shooter.spinUp { presetRpm },
+            sequential(
+                waitUntil { shooter.atTarget },
+                parallel(intake.collect(), feeder.feedOnceReady { true }),
+            ),
         ),
     )
 

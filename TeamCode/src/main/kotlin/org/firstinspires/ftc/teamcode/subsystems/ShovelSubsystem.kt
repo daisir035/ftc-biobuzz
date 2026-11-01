@@ -101,6 +101,6 @@ object ShovelConfig {
     @JvmField var targetOffsetDegrees = 0.0
     @JvmField var fullyLoweredOffsetDegrees = 133.0
     @JvmField var preset1OffsetDegrees = 0.0
-    @JvmField var preset2OffsetDegrees = 125.0
+    @JvmField var preset2OffsetDegrees = 133.0
     @JvmField var stepDegrees = 1.0
 }

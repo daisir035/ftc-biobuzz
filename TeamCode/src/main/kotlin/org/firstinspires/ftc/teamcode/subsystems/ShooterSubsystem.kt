@@ -162,9 +162,9 @@ class ShooterSubsystem(
          * Motor names whose positive power spins the flywheel backwards.
          * SDK convention: positive power on a FORWARD motor turns the shaft
          * counter-clockwise seen from the shaft end. "up" launches
-         * counter-clockwise (FORWARD), "down" clockwise (REVERSE).
+         * clockwise (REVERSE), "down" counter-clockwise (FORWARD).
          */
-        val REVERSED = setOf(RobotConfig.Shooter.DOWN_MOTOR)
+        val REVERSED = setOf(RobotConfig.Shooter.UP_MOTOR)
     }
 }
 
@@ -178,7 +178,7 @@ object ShooterConfig {
     @JvmField var targetRpm = 1400.0
 
     /** Match presets (motor output RPM), chosen on the operator's dpad. Placeholders until shots are tested. */
-    @JvmField var nearRpm = 600.0
+    @JvmField var nearRpm = 720.0
     @JvmField var farRpm = 1500.0
 
     /** |measured − target| at or under this counts as [ShooterSubsystem.atTarget]. */

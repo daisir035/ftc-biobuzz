@@ -313,8 +313,9 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   is continuous.
 - "Competition" (`opmodes/CompetitionTeleOp.kt`) uses gamepad 1 only: R1/L1 hold
   collect/eject; Cross toggles the flywheel, dpad up/down picks
-  far/near, R2 (hold) shoots — wait for the flywheel to reach speed once,
-  then run intake and feeder together without pausing until released.
+  far/near, R2 (hold) starts the flywheel, waits for it to reach speed once,
+  then runs intake and feeder together without pausing. Releasing R2 stops
+  the flywheel, intake and feeder.
   L2 holds precision driving; Square switches the shovels between 0° and 125°.
   The shovels hold 0° after START and disable PWM on STOP. The aligned reference
   is left 0.36/right 0.225, and the measured fully lowered limit is 133°.
@@ -326,6 +327,25 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   `intakeReversePower` (-0.2) for `intakeReverseMs` (150 ms). These settings
   are live in Panels. A new R1 press restarts the intake assist; R2 shooting
   cancels the assist and any pending reverse pulse.
+- "Flower Cycle RED/BLUE" (`opmodes/FlowerCycleAuto.kt`) sequences a preload shot,
+  shovel lowering, first FLOWER collection, far-side shot, second FLOWER collection,
+  and a return shot. The `USER PATH SECTION` contains the supplied four-curve RED
+  reference route; its final shot is at (61.3271, 133.0142, 90°), not the starting
+  pose. `pathsConfigured` is true for this route; set it false while editing an
+  incomplete route to refuse START. BLUE uses the same routine through `Alliance.poses()`.
+  `FlowerCycleConfig` holds the three feed durations (initially 1500 ms each), two
+  collection dwells (700 ms each), shovel settling wait (300 ms), path/settling/readiness
+  timeouts, and `spinUpProgress` (0.7 = 70% through each shooting approach).
+  The flywheel stays on from that marker through arrival and feeding; a missed marker
+  falls back to spin-up at approach end. Preload uses `ShooterConfig.nearRpm`;
+  both far-side shots use `farRpm` because their supplied shooting points are adjacent.
+  Feeding starts only at the measured shooting pose and
+  target RPM; an unready shot is skipped after its timeout. Once feeding starts,
+  it stays continuous through normal speed dips until that burst's timer ends.
+  Collection runs intake and low-power feeder assist during travel and dwell; it
+  does not run the teleop release reverse pulse. Shovels stay lowered after the first
+  burst. The whole routine has a 29-second limit including the selected start delay.
+  Timing defaults are starting guesses, not a validated 30-second match strategy.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
   `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted
