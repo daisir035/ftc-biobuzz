@@ -420,14 +420,19 @@ sensor reads by default.
 
 ## When the user asks you to add a path or auton routine
 
-Copy `opmodes/skeletons/ExampleAuto.kt` (routine and meaningful steps `logged`,
-drive steps named): RED poses through `alliance.poses()`,
-paths from `Paths`, the routine as Ivy groups of drive commands, `race`
-timeouts, `deadline` markers, start gates (`FORESIGHT_TUNED`; up to 1 s for
-`localizer.ready`, then run anyway unless the pose is lost; schedule
-accepted), `onStatusFault = {}`, stop when the routine is no longer
-scheduled. One `@Autonomous` class per alliance and routine; the BLUE copy
-overrides `initialAlliance` only. Start delay on dpad in init, as in the example.
+Extend `opmodes/AutoBase.kt` (see `dutchdocs/DEVELOPMENT.md` → *Compose an
+autonomous*): override `startPose`, `routineName`, `configureMechanisms()`
+and `routine()`. AutoBase owns the lifecycle the skeleton writes out by hand
+(start pose at INIT, start delay on dpad, `FORESIGHT_TUNED` and
+`startBlocker()` gates, up to 1 s for `localizer.ready`, `onStatusFault = {}`,
+the routine time limit, drive cleanup, stop when the routine is no longer
+scheduled). Use `follow(name, path)` for drive steps (it aborts on a path
+timeout before arrival), RED poses through `poses`, paths from `Paths`, and
+mechanism steps from `subsystems/Scoring.kt` (shared with teleop; don't
+rebuild intake/feeder/flywheel combinations in an op-mode). Share a route
+between op-modes in one class (`opmodes/FlowerRoute.kt`). One `@Autonomous`
+class per alliance and routine; the BLUE copy overrides `initialAlliance`
+only.
 
 ## Naming op-modes
 

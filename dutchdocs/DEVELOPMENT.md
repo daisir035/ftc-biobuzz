@@ -140,47 +140,55 @@ ownership unlocks) and three times at 0:20 left (`TeleOpBase.onStart`).
 
 ## Compose an autonomous
 
-Copy `opmodes/skeletons/ExampleAuto.kt`. The shape:
+Extend `opmodes/AutoBase.kt`. It owns everything that is not the route:
+drive and localizer registration, the start pose written to the Pinpoint at
+INIT, the start delay on dpad left/right, the START gates (Foresight tuned,
+`startBlocker()`, up to 1 s for `localizer.ready`, then run anyway unless the
+pose is lost), the `AutoConfig.routineLimitMs` limit, stopping the drive when
+the routine ends, and stopping the op-mode. A routine file is then three
+things:
 
 ```kotlin
-private val poses get() = alliance.poses()          // degrees, RED coordinates
-private val start get() = poses.of(8.0, 56.0, 0.0)
-private val score get() = poses.of(32.0, 56.0, 0.0)
+@Autonomous(name = "Score Preload RED", group = "Match")
+open class ScorePreloadAutoRed : AutoBase() {
+    override val initialAlliance get() = Alliance.RED
+    override val routineName = "Score Preload"
+    override val startPose get() = poses.of(8.0, 56.0, 0.0)     // RED, degrees
+    private val score get() = poses.of(32.0, 56.0, 0.0)
 
-private fun toScore(): Path = Paths.line(start, score).constant(start)
+    private lateinit var scoring: Scoring
+    override fun configureMechanisms() {                         // 1. mechanisms
+        val intake = robot.register(IntakeSubsystem())
+        // … feeder, shooter …
+        scoring = Scoring(intake, feeder, shooter, robot.clock, robot::recordEvent)
+    }
 
-private fun routine(): Command = logged(
-    "Score preload",
-    race(
-        sequential(
-            logged("Start delay", monotonicWaitMs(startDelaySec * 1000.0)),
-            race(
-                drive.followCommand(toScore(), name = "Drive to score"),
-                logged("Drive to score time limit", monotonicWaitMs(4_000.0)), // step timeout
-            ),
-            drive.holdCommand(score, name = "Settle at score"),               // wait for arrival
-            instant { robot.recordEvent("AUTO: scored") },
-            drive.turnToCommand(alliance.mirror(Math.toRadians(90.0)), name = "Face the wall"),
-        ),
-        logged("Routine time limit", monotonicWaitMs(29_000.0)),             // whole-routine timeout
-    ),
-)
+    private fun toScore(): Path = Paths.line(startPose, score).linear(startPose, score)  // 2. paths
+
+    override fun routine(): Command = sequential(               // 3. steps
+        follow("Drive to score", toScore()),        // aborts the routine if it times out before arrival
+        drive.holdCommand(score, name = "Settle at score"),
+        deadline(scoring.burst("Preload") { drive.atPose(score) }, shooter.spinUp { ShooterConfig.nearRpm }),
+    )
+}
+
+@Autonomous(name = "Score Preload BLUE", group = "Match")
+class ScorePreloadAutoBlue : ScorePreloadAutoRed() {
+    override val initialAlliance get() = Alliance.BLUE
+}
 ```
 
-Schedule, check and cancel the returned `routine()` instance. Drive commands
-take a `name`; wrap everything else worth seeing with `logged(...)`.
-
-Pass the start pose to the localizer in `configure()`:
-`LocalizerSubsystem(follower, ..., startingPose = start)`. It is written to the
-Pinpoint at INIT, so place the robot before pressing INIT; nudging it into
-place during init is fine, the pose snaps back to the start pose. Pass
-`onStatusFault = {}` so a Pinpoint status problem is only logged and the auto
-keeps driving; only a lost pose (`onFault`) cancels it. In `onStart`: refuse to
-run if `!Constants.FORESIGHT_TUNED`. Then, from `onLoop`, start the routine once
-`localizer.ready`, or after one second anyway unless `localizer.fault` is set
-(START pressed right after INIT): `Scheduler.schedule(...)` and check
-`Scheduler.isScheduled(...)`. Stop the op-mode once the routine is no longer
-scheduled.
+Step helpers on `AutoBase`: `follow(name, path)` (follow and hold the end;
+abort the routine if `AutoConfig.pathTimeoutMs` passes before arrival),
+`within(pose, inches)` (for "start the intake near the FLOWER"),
+`abortRoutine(reason)`. Mechanism combinations come from
+`subsystems/Scoring.kt`, the same ones teleop uses: `collect(active)`,
+`eject()`, `shoot(rpm)` (teleop) and `burst(name, ready)` (autos: wait for pose
+and speed, feed until `ScoringConfig.ballsPerBurst` shots are seen or
+`burstMaxMs`). Share a route between op-modes as a class like
+`opmodes/FlowerRoute.kt`, so a pose is edited in one place.
+`opmodes/skeletons/ExampleAuto.kt` still shows the same lifecycle written
+out by hand.
 
 - **Waits:** use `monotonicWaitMs(ms)` from `core/`, not Ivy's `waitMs`,
   which is timed by the wall clock and ends early or stalls if the hub's
@@ -308,60 +316,57 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   `measuredRpm` settles just under target, then add `kP` until recovery
   after a shot is quick without oscillation. Watch `Shooter/power`,
   `measuredRpm`, `batteryVolts` in the log.
-- Feeder: `feedOnceReady { shooter.atTarget }` waits for the flywheel to
-  reach speed once, then feeds without pausing until released, so a burst
-  is continuous.
-- "Competition" (`opmodes/CompetitionTeleOp.kt`) uses gamepad 1 only: R1/L1 hold
-  collect/eject; Cross toggles the flywheel, dpad up/down picks
-  far/near, R2 (hold) starts the flywheel, waits for it to reach speed once,
-  then runs intake and feeder together without pausing. Releasing R2 stops
-  the flywheel, intake and feeder.
-  L2 holds precision driving; Square switches the shovels between 0° and 125°.
-  The shovels hold 0° after START and disable PWM on STOP. The aligned reference
-  is left 0.36/right 0.225, and the measured fully lowered limit is 133°.
-  `ShovelConfig` holds these values; 0° is the existing reference, not a newly
-  inferred raised zero. Existing Create+Triangle/Create+Circle drive chords remain.
-- While driver R1 collects, feeder assists at `FeederConfig.intakePower`
-  (0.2). Releasing R1 stops the intake and feeder, waits
-  `intakeReleaseDelayMs` (200 ms), then reverses the feeder at
-  `intakeReversePower` (-0.2) for `intakeReverseMs` (150 ms). These settings
-  are live in Panels. A new R1 press restarts the intake assist; R2 shooting
-  cancels the assist and any pending reverse pulse.
-- "Just Path RED" (`opmodes/JustPathAuto.kt`) tests the latest supplied four-curve
-  route from (57.3401, 7.4974, -90°), with linear heading interpolation. Only the drive,
-  localizer and intake are used. Paths 1 and 3 start intake at 80% progress,
-  collect for 700 ms at the FLOWER, then stop intake before the next path.
-  `JustPathConfig` exposes that progress and dwell in Panels. Cancellation or
-  the 29-second routine timeout also stops intake. No shooter or shovel actions run.
-- "Flower Cycle RED/BLUE" (`opmodes/FlowerCycleAuto.kt`) sequences a preload shot,
-  first FLOWER collection, far-side shot, second FLOWER collection,
-  and a return shot. The `USER PATH SECTION` contains the supplied four-curve RED
-  reference route shared with Just Path RED; its final shot is at (65.18, 116.5975, 90°), not the starting
-  pose. `pathsConfigured` is true for this route; set it false while editing an
-  incomplete route to refuse START. BLUE uses the same routine through `Alliance.poses()`.
-  `FlowerCycleConfig` holds the three feed durations (initially 1500 ms each), two
-  collection dwells (700 ms each), shovel departure delays (1000 ms), wall clearance
-  (18 inches from the robot centre to every wall), path/settling/readiness
-  timeouts, and `spinUpProgress` (0.7 = 70% through each shooting approach).
-  The flywheel stays on from that marker through arrival and feeding; a missed marker
-  falls back to spin-up at approach end. Preload uses `ShooterConfig.nearRpm`;
-  both far-side shots use `farRpm` because their supplied shooting points are adjacent.
-  Shovels stay raised through the preload and the first second of the first path,
-  then lower only after clearing the walls. They retract one second after leaving
-  either FLOWER (or on shooting approach arrival if sooner). On the second collection
-  path they lower once the measured pose clears the walls. Arrival at the final shot
-  always retracts them. Markers are cancelled with their path, so they cannot fire later.
-  Path headings interpolate during travel: -90° to 180°, then 180° to 90°;
-  the last two paths keep 90°. Control-point headings do not affect this interpolation.
-  Feeding starts only at the measured shooting pose and
-  target RPM; an unready shot is skipped after its timeout. Once feeding starts,
-  it stays continuous through normal speed dips until that burst's timer ends.
-  Collection runs intake and low-power feeder assist during travel and dwell; it
-  does not run the teleop release reverse pulse. A path timeout while outside the
-  endpoint pose tolerance aborts this routine and stops the drive and mechanisms;
-  it never starts the next path from an unconfirmed endpoint. The whole routine
-  has a 29-second limit including the selected start delay.
-  Timing defaults are starting guesses, not a validated 30-second match strategy.
+- Feeder: `feedOnceReady(ready, spinning)` waits for the flywheel to reach
+  speed once, then feeds without pausing, so a burst is continuous; if the
+  flywheel is switched off it stops and waits for speed again.
+- Shooter counts shots (`shotsFired`, logged): a fall of more than
+  `ShooterConfig.shotDipRpm` (60) below target after being at speed. Balls
+  that leave before the flywheel recovers count once. Read the real dip off
+  `Shooter/measuredRpm` and set `shotDipRpm` to about half of it. A
+  non-finite speed or target (e.g. `ticksPerRev` typed as 0) writes 0 and
+  resets the controller.
+- `subsystems/Scoring.kt` is the ball path as one unit, shared by teleop and
+  autos: `collect(active)` runs intake and feeder assist
+  (`FeederConfig.intakePower`) while `active()`, then stops the intake,
+  waits `intakeReleaseDelayMs` (200 ms) and reverses the feeder
+  (`intakeReversePower` −0.2, `intakeReverseMs` 150 ms); `eject()`;
+  `shoot(rpm)` (teleop R2: spin up; intake and feeder start together at
+  speed); `burst(name, ready)` (autos, with the flywheel already spinning:
+  wait up to `ScoringConfig.readyTimeoutMs` for `ready()` and speed, then
+  feed until `ballsPerBurst` shots plus `shotTailMs`, at most `burstMaxMs`;
+  intake and feeder never run below speed).
+- "Competition" (`opmodes/CompetitionTeleOp.kt`) uses gamepad 1 only: R1
+  holds collect, L1 holds eject; Cross toggles the flywheel, dpad up/down
+  picks far/near, R2 (hold) shoots and its release stops the flywheel,
+  intake and feeder. R1 still held after R2 or L1 is released collects
+  again. L2 holds precision driving; Square switches the shovels between 0°
+  and 125°. The shovels hold 0° after START and disable PWM on STOP. The
+  aligned reference is left 0.36/right 0.225, and the measured fully lowered
+  limit is 133° (`ShovelConfig`). Create+Triangle/Create+Circle drive chords
+  remain.
+- `opmodes/FlowerRoute.kt` is the FLOWER route, shared by Flower Cycle and
+  Just Path: start (57.3401, 7.4974, −90°) → first FLOWER (23.3387, 42.5526,
+  180°) → far shot (66.0339, 115.8782, 90°) → second FLOWER (55.782,
+  112.4703, 90°) → home shot (65.18, 116.5975, 90°), RED, every path turning
+  along its length (−90°→180°, 180°→90°, then 90°).
+- "Flower Cycle RED/BLUE" (`opmodes/FlowerCycleAuto.kt`): preload shot (near
+  preset), first FLOWER, far shot, second FLOWER, home shot (far preset).
+  - Collection: shovels lower after `shovelLowerDelayMs` (first FLOWER only)
+    and once the robot centre is `shovelWallClearanceInches` (18) from every
+    wall; intake and feeder assist start only within
+    `intakeStartDistanceIn` (24) of the FLOWER, or on arrival, then dwell
+    `firstCollectMs`/`secondCollectMs`.
+  - Shot: shovels rise `shovelRaiseDelayMs` after leaving (and on arrival);
+    the flywheel starts at `spinUpProgress` (0.7) of the approach and stays
+    on through settling (`settleTimeoutMs`) and `Scoring.burst`. A shot short
+    of its pose still feeds once the ready wait runs out (logged as "fed
+    before ready"); it never feeds below speed.
+  - A path that times out before arrival (`AutoConfig.pathTimeoutMs`) aborts
+    the routine and stops everything. Timing defaults are starting guesses,
+    not a validated 30-second plan.
+- "Just Path RED" (`opmodes/JustPathAuto.kt`) drives the same route with
+  only the intake, starting it at `JustPathConfig.intakeStartProgress` (80%)
+  of paths 1 and 3 and dwelling `collectMs` (700 ms). No shooter or shovels.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
   `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted

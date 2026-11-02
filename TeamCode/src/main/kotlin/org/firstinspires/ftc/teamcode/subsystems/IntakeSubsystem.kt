@@ -40,6 +40,10 @@ class IntakeSubsystem : SubsystemBase("Intake") {
     /** Runs the intake until interrupted. */
     fun collect(): Command = spin("Intake collect") { IntakeConfig.collectPower }
 
+    /** Collects while `active()` is true and idles otherwise, until interrupted. */
+    fun collectWhile(active: () -> Boolean): Command =
+        spin("Intake collect") { if (active()) IntakeConfig.collectPower else 0.0 }
+
     /** Runs the intake backwards until interrupted, to spit a ball out or clear a jam. */
     fun eject(): Command = spin("Intake eject") { IntakeConfig.ejectPower }
 

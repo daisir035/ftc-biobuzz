@@ -52,6 +52,16 @@ class ShooterSubsystem(
     var power: Double = 0.0
         private set
 
+    /**
+     * Shots detected since the flywheel was last stopped: each time the speed
+     * falls more than [ShooterConfig.shotDipRpm] below target after having been
+     * [atTarget]. Back-to-back balls that land before the flywheel recovers count
+     * once, so treat it as "at least this many". Reset when [targetRpm] clears.
+     */
+    var shotsFired: Int = 0
+        private set
+    private var shotArmed = false
+
     private var batteryVolts = Double.NaN
     private var lastVoltageReadNs = Long.MIN_VALUE
     private var integral = 0.0
@@ -83,12 +93,28 @@ class ShooterSubsystem(
     override fun periodic() {
         // Direction applies to the reading too: positive is launching speed.
         measuredRpm = (encoder?.velocity ?: 0.0) / ShooterConfig.ticksPerRev * 60.0
+        countShots()
         // Battery voltage is not in the bulk read: one extra hub read every 100 ms.
         val now = clock.nanos()
         val sensor = voltageSensor
         if (sensor != null && (lastVoltageReadNs == Long.MIN_VALUE || now - lastVoltageReadNs >= 100_000_000L)) {
             batteryVolts = sensor.voltage
             lastVoltageReadNs = now
+        }
+    }
+
+    private fun countShots() {
+        val target = targetRpm
+        when {
+            target == null -> {
+                shotsFired = 0
+                shotArmed = false
+            }
+            atTarget -> shotArmed = true
+            shotArmed && measuredRpm < target - ShooterConfig.shotDipRpm -> {
+                shotsFired++
+                shotArmed = false
+            }
         }
     }
 
@@ -107,6 +133,13 @@ class ShooterSubsystem(
         val c = ShooterConfig
         val now = clock.nanos()
         val error = target - measuredRpm
+        // A Panels typo (ticksPerRev = 0, a NaN preset) must not reach the motors:
+        // the SDK's power cache drops NaN and leaves the last power applied. Reset
+        // too, or a NaN integral would outlive the typo.
+        if (!error.isFinite()) {
+            resetController()
+            return 0.0
+        }
         val dt = if (lastControlNs == Long.MIN_VALUE) 0.0 else (now - lastControlNs) / 1e9
         val voltageScale = if (batteryVolts.isFinite() && batteryVolts > 6.0) c.nominalVolts / batteryVolts else 1.0
         if (dt > 0.0) {
@@ -118,7 +151,7 @@ class ShooterSubsystem(
         lastError = error
         lastControlNs = now
         val output = c.kF * target * voltageScale + c.kP * error + c.kI * integral + c.kD * derivative
-        return output.coerceIn(0.0, 1.0)
+        return if (output.isFinite()) output.coerceIn(0.0, 1.0) else 0.0
     }
 
     private fun resetController() {
@@ -130,7 +163,11 @@ class ShooterSubsystem(
     /** Holds [ShooterConfig.targetRpm] until interrupted. */
     fun spinUp(): Command = spinUp { ShooterConfig.targetRpm }
 
-    /** Holds [rpm], re-read every tick so a preset change applies while spinning, until interrupted. */
+    /**
+     * Holds [rpm], re-read every tick so a preset change applies while spinning.
+     * Never finishes by itself: bound it with `race`/`deadline`. Ending it clears
+     * [targetRpm] (the flywheel coasts).
+     */
     fun spinUp(rpm: () -> Double): Command = logged(
         "Shooter spin up",
         infinite { targetRpm = rpm() }.requiring(this).setEnd { targetRpm = null },
@@ -155,6 +192,7 @@ class ShooterSubsystem(
         log.put("atTarget", atTarget)
         log.put("power", power)
         log.put("batteryVolts", batteryVolts)
+        log.put("shotsFired", shotsFired.toLong())
     }
 
     private companion object {
@@ -183,6 +221,13 @@ object ShooterConfig {
 
     /** |measured − target| at or under this counts as [ShooterSubsystem.atTarget]. */
     @JvmField var speedToleranceRpm = 20.0
+
+    /**
+     * A drop this far below target, after being at speed, counts as one shot
+     * ([ShooterSubsystem.shotsFired]). Starting guess: read the real dip off
+     * `Shooter/measuredRpm` in a log, then set this to about half of it.
+     */
+    @JvmField var shotDipRpm = 60.0
 
     /**
      * Feedforward, power per RPM at [nominalVolts]. Start: 1 / 1620 (free

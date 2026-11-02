@@ -68,6 +68,7 @@ class AutomaticStateLogTest {
                 "atTarget" to false,
                 "power" to 0.0,
                 "batteryVolts" to Double.NaN,
+                "shotsFired" to 0L,
             ),
             shooter.values,
         )

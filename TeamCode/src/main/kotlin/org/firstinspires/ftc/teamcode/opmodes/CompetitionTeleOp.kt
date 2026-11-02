@@ -1,19 +1,15 @@
 package org.firstinspires.ftc.teamcode.opmodes
 
-import com.pedropathing.ivy.Command
 import com.pedropathing.ivy.commands.Commands.instant
-import com.pedropathing.ivy.commands.Commands.waitUntil
-import com.pedropathing.ivy.groups.Groups.parallel
-import com.pedropathing.ivy.groups.Groups.sequential
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.ServoImplEx
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.GamepadEx.Button
 import org.firstinspires.ftc.teamcode.core.Preflight
-import org.firstinspires.ftc.teamcode.core.logging.logged
 import org.firstinspires.ftc.teamcode.subsystems.FeederSubsystem
 import org.firstinspires.ftc.teamcode.subsystems.IntakeSubsystem
+import org.firstinspires.ftc.teamcode.subsystems.Scoring
 import org.firstinspires.ftc.teamcode.subsystems.ShooterConfig
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 import org.firstinspires.ftc.teamcode.subsystems.ShovelConfig
@@ -34,7 +30,9 @@ import org.firstinspires.ftc.teamcode.subsystems.ShovelSubsystem
  *  - **L2** (hold) — precision driving
  *  - **Square** — switch shovels between the 0° and 125° working presets
  *
- * Shooting takes the intake, so it overrides the driver's collect until released.
+ * Shooting and ejecting take the intake and feeder; R1 still held when they
+ * are released collects again. Every intake/feeder/flywheel combination is
+ * [Scoring]'s, shared with the autos.
  */
 @TeleOp(name = "Competition", group = "Match")
 class CompetitionTeleOp : TeleOpBase() {
@@ -73,27 +71,21 @@ class CompetitionTeleOp : TeleOpBase() {
             if (shovelExtended) ShovelConfig.preset2OffsetDegrees else ShovelConfig.preset1OffsetDegrees
         }
 
-        driver.button(Button.R1).whileTrue(intake.collect())
-            .onTrue(feeder.intakeAssist(intaking = { driver.held(Button.R1) }))
-        driver.button(Button.L1).whileTrue(parallel(intake.eject(), feeder.eject()))
+        val scoring = Scoring(intake, feeder, shooter, robot.clock)
+        val shooting = { driver.r2 > SHOOT_THRESHOLD }
+        // Collect only while nothing else wants the intake, so releasing R2 or L1
+        // with R1 held is a new rising edge. The command ends itself after the
+        // feeder's reverse pulse.
+        val collecting = { driver.held(Button.R1) && !driver.held(Button.L1) && !shooting() }
+        driver.trigger { collecting() }.onTrue(scoring.collect(collecting))
+        driver.button(Button.L1).whileTrue(scoring.eject())
 
         driver.button(Button.CROSS).toggleOnTrue(shooter.spinUp { presetRpm })
         driver.button(Button.DPAD_UP).onTrue(instant { preset = Preset.FAR })
         driver.button(Button.DPAD_DOWN).onTrue(instant { preset = Preset.NEAR })
-        driver.trigger { driver.r2 > 0.3 }.whileTrue(shoot())
+        driver.trigger { shooting() }.whileTrue(scoring.shoot { presetRpm })
         driver.button(Button.SQUARE).onTrue(instant { shovelExtended = !shovelExtended })
     }
-
-    private fun shoot(): Command = logged(
-        "Shoot",
-        parallel(
-            shooter.spinUp { presetRpm },
-            sequential(
-                waitUntil { shooter.atTarget },
-                parallel(intake.collect(), feeder.feedOnceReady { true }),
-            ),
-        ),
-    )
 
     override fun onLoop() {
         telemetryBag.section("Shovel") {
@@ -112,5 +104,9 @@ class CompetitionTeleOp : TeleOpBase() {
             put("pose", drive.pose)
             put("fieldCentric", drive.fieldCentric)
         }
+    }
+
+    private companion object {
+        const val SHOOT_THRESHOLD = 0.3
     }
 }

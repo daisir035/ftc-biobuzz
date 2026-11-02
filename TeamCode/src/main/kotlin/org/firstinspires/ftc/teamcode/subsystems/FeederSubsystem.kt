@@ -15,8 +15,10 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
 
 /**
  * The motor that pushes balls from the intake into the flywheel
- * ([RobotConfig.Feeder.MOTORS]); positive feeds toward the flywheel. No
- * blocker servo. Off unless a command runs it.
+ * ([RobotConfig.Feeder.MOTORS]); positive feeds toward the flywheel. The
+ * blocker servo is a separate mechanism (Transfer, not implemented yet). Off
+ * unless a command runs it. Commands that combine it with the intake and the
+ * flywheel live in [Scoring].
  */
 class FeederSubsystem : SubsystemBase("Feeder") {
 
@@ -77,10 +79,12 @@ class FeederSubsystem : SubsystemBase("Feeder") {
 
     /**
      * Waits until `ready()` is first true (the flywheel at speed), then feeds
-     * at [FeederConfig.feedPower] without pausing until interrupted, so a
-     * burst is not broken up by the speed dip of each shot.
+     * at [FeederConfig.feedPower] without pausing, so a burst is not broken up
+     * by the speed dip of each shot. If `spinning()` goes false (the flywheel
+     * was switched off) it stops and waits for `ready()` again. Never finishes
+     * by itself.
      */
-    fun feedOnceReady(ready: () -> Boolean): Command {
+    fun feedOnceReady(ready: () -> Boolean, spinning: () -> Boolean): Command {
         var released = false
         return logged(
             "Feeder feed",
@@ -88,7 +92,7 @@ class FeederSubsystem : SubsystemBase("Feeder") {
                 .requiring(this)
                 .setStart { released = false }
                 .setExecute {
-                    if (!released && ready()) released = true
+                    if (!spinning()) released = false else if (!released && ready()) released = true
                     power = if (released) FeederConfig.feedPower else 0.0
                 }
                 .setEnd {

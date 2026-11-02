@@ -130,6 +130,58 @@ class ShooterSubsystemTest {
     }
 
     @Test
+    fun aNonFiniteSpeedOrTargetWritesZeroAndLeavesNoNanBehind() {
+        ShooterConfig.kP = 0.0
+        ShooterConfig.kI = 1.0
+        shooter.init(hardware)
+        ShooterConfig.ticksPerRev = 0.0 // 0 / 0 ticks: measured speed is NaN.
+        Scheduler.schedule(shooter.spinUp { 1000.0 })
+        tick()
+        tick()
+        assertEquals(0.0, up.power, 0.0) // MotorProbe rejects a NaN write outright.
+
+        // Fixed in Panels: the controller restarts clean, feedforward only on its first tick.
+        ShooterConfig.ticksPerRev = 103.8
+        tick()
+        assertEquals(0.5, up.power, 1e-9)
+
+        Scheduler.schedule(shooter.spinUp { Double.NaN })
+        tick()
+        assertEquals(0.0, up.power, 0.0)
+    }
+
+    @Test
+    fun eachDipBelowTargetAfterReachingItCountsOneShot() {
+        ShooterConfig.speedToleranceRpm = 20.0
+        ShooterConfig.shotDipRpm = 60.0
+        shooter.init(hardware)
+        val spin = shooter.spinUp { 1000.0 }
+        Scheduler.schedule(spin)
+        tick()
+        tick()
+        assertEquals(0, shooter.shotsFired) // Spinning up from rest is not a shot.
+
+        up.velocity = 1730.0 // 1000 RPM: at speed, armed.
+        tick()
+        up.velocity = 1557.0 // 900 RPM: a ball took 100 RPM.
+        tick()
+        assertEquals(1, shooter.shotsFired)
+        tick()
+        assertEquals(1, shooter.shotsFired) // Still low: the same shot.
+
+        up.velocity = 1730.0
+        tick()
+        up.velocity = 1557.0
+        tick()
+        assertEquals(2, shooter.shotsFired)
+
+        Scheduler.cancel(spin)
+        tick()
+        tick()
+        assertEquals(0, shooter.shotsFired) // Cleared with the target.
+    }
+
+    @Test
     fun faultsAndStopZeroTheMotors() {
         shooter.init(hardware)
         val spin = shooter.spinUp { 1000.0 }
