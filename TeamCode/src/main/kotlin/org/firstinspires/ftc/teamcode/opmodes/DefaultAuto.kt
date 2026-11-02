@@ -18,9 +18,10 @@ import org.firstinspires.ftc.teamcode.subsystems.LocalizerSubsystem
 import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem
 
 /**
- * Default auton: one straight path from the start pose to the far target,
- * turning along the way (`linear`). RED coordinates; BLUE is the season's
- * 180° rotation ([Alliance.poses]).
+ * Default auton: one straight path of about 20 in from the start pose to
+ * [path1End], turning along the way (`linear`), then a hold until the
+ * measured pose arrives (the path's parametric end is not arrival). RED
+ * coordinates; BLUE is the season's 180° rotation ([Alliance.poses]).
  *
  * Lifecycle follows the Example Auto skeleton: start pose is written to the
  * Pinpoint at INIT (place the robot first), start delay is picked on dpad
@@ -77,9 +78,10 @@ open class DefaultAutoRed : OpModeBase() {
             sequential(
                 logged("Start delay", waitMs(startDelaySec * 1000.0)),
                 race(
-                    drive.followCommand(path1(), holdEnd = true, name = "Drive path 1"),
+                    drive.followCommand(path1(), name = "Drive path 1"),
                     logged("Path 1 time limit", waitMs(8_000.0)),
                 ),
+                drive.holdCommand(path1End, name = "Settle at path 1 end"),
                 instant { robot.recordEvent("AUTO: complete") },
             ),
             logged("Routine time limit", waitMs(29_000.0)),

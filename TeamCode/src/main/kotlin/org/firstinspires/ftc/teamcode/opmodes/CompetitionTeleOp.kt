@@ -3,15 +3,14 @@ package org.firstinspires.ftc.teamcode.opmodes
 import com.pedropathing.ivy.Command
 import com.pedropathing.ivy.Scheduler
 import com.pedropathing.ivy.commands.Commands.instant
-import com.pedropathing.ivy.groups.Groups.parallel
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.GamepadEx.Button
 import org.firstinspires.ftc.teamcode.core.Preflight
-import org.firstinspires.ftc.teamcode.core.logging.logged
 import org.firstinspires.ftc.teamcode.subsystems.FeederSubsystem
 import org.firstinspires.ftc.teamcode.subsystems.IntakeSubsystem
+import org.firstinspires.ftc.teamcode.subsystems.Scoring
 import org.firstinspires.ftc.teamcode.subsystems.ShooterConfig
 import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 
@@ -29,7 +28,8 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
  *    starts the first time the flywheel is at speed and then feeds without
  *    pausing, so the whole burst goes out continuously
  *
- * Shooting takes the intake, so it overrides the driver's collect until released.
+ * Shooting takes the intake, so it overrides the driver's collect or eject;
+ * a bumper still held when R2 is released takes the intake back.
  */
 @TeleOp(name = "Competition", group = "Match")
 class CompetitionTeleOp : TeleOpBase() {
@@ -40,6 +40,7 @@ class CompetitionTeleOp : TeleOpBase() {
     private lateinit var feeder: FeederSubsystem
     private lateinit var shooter: ShooterSubsystem
     private lateinit var spinUp: Command
+    private lateinit var scoring: Scoring
 
     private var preset = Preset.NEAR
 
@@ -59,19 +60,18 @@ class CompetitionTeleOp : TeleOpBase() {
         feeder = robot.register(FeederSubsystem())
         shooter = robot.register(ShooterSubsystem(batteryVolts = { robot.hubPower.batteryVolts }))
         spinUp = shooter.spinUp { presetRpm }
+        scoring = Scoring(intake, feeder, shooter)
 
-        driver.button(Button.R1).whileTrue(intake.collect())
-        driver.button(Button.L1).whileTrue(intake.eject())
+        // Bumpers count only while not shooting, so releasing R2 with a bumper
+        // held is a rising edge that restarts the driver's command.
+        val shooting = { operator.r2 > SHOOT_THRESHOLD }
+        driver.trigger { driver.held(Button.R1) && !shooting() }.whileTrue(intake.collect())
+        driver.trigger { driver.held(Button.L1) && !shooting() }.whileTrue(intake.eject())
 
         operator.button(Button.DPAD_UP).onTrue(instant { preset = Preset.FAR })
         operator.button(Button.DPAD_DOWN).onTrue(instant { preset = Preset.NEAR })
-        operator.trigger { operator.r2 > 0.3 }.whileTrue(shoot())
+        operator.trigger { shooting() }.whileTrue(scoring.feed())
     }
-
-    private fun shoot(): Command = logged(
-        "Shoot",
-        parallel(intake.collect(), feeder.feedOnceReady { shooter.atTarget }),
-    )
 
     override fun onLoop() {
         // A toggle, not a binding: onLoop() runs outside Scheduler.execute(), so this may schedule.
@@ -89,5 +89,9 @@ class CompetitionTeleOp : TeleOpBase() {
             put("pose", drive.pose)
             put("fieldCentric", drive.fieldCentric)
         }
+    }
+
+    private companion object {
+        const val SHOOT_THRESHOLD = 0.3
     }
 }

@@ -39,7 +39,7 @@ class FeederSubsystemTest {
     @Test
     fun feedingStartsOnceReadyAndDoesNotPauseOnASpeedDip() {
         var ready = false
-        val feed = feeder.feedOnceReady { ready }
+        val feed = feeder.feedOnceReady(ready = { ready }, spinning = { true })
         Scheduler.schedule(feed)
         tick()
         assertPower(0.0)
@@ -60,7 +60,7 @@ class FeederSubsystemTest {
     @Test
     fun aNewBurstWaitsForReadyAgain() {
         var ready = true
-        val feed = feeder.feedOnceReady { ready }
+        val feed = feeder.feedOnceReady(ready = { ready }, spinning = { true })
         Scheduler.schedule(feed)
         tick()
         Scheduler.cancel(feed)
@@ -72,14 +72,37 @@ class FeederSubsystemTest {
     }
 
     @Test
+    fun switchingTheFlywheelOffStopsTheFeedUntilItIsReadyAgain() {
+        var ready = true
+        var spinning = true
+        Scheduler.schedule(feeder.feedOnceReady(ready = { ready }, spinning = { spinning }))
+        tick()
+        assertPower(FeederConfig.feedPower)
+
+        spinning = false
+        ready = false
+        tick()
+        assertPower(0.0)
+
+        // Back on but still below speed: the burst does not resume yet.
+        spinning = true
+        tick()
+        assertPower(0.0)
+
+        ready = true
+        tick()
+        assertPower(FeederConfig.feedPower)
+    }
+
+    @Test
     fun faultsAndStopZeroTheMotors() {
-        Scheduler.schedule(feeder.feedOnceReady { true })
+        Scheduler.schedule(feeder.feedOnceReady(ready = { true }, spinning = { true }))
         tick()
         feeder.onCommandFault()
         feeder.writeHardware()
         assertPower(0.0)
 
-        Scheduler.schedule(feeder.feedOnceReady { true })
+        Scheduler.schedule(feeder.feedOnceReady(ready = { true }, spinning = { true }))
         tick()
         feeder.stop()
         assertPower(0.0)

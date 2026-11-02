@@ -284,7 +284,9 @@ Season mechanisms live in `subsystems/` next to the drive: `IntakeSubsystem`,
 - `ballStaged` is null until a ball sensor is fitted.
 
 **Shooter, Feeder and the "Competition" teleop are implemented; Turret is
-still an unconfigured skeleton** — its `init` fails explicitly.
+still an unconfigured skeleton** — its `init` fails explicitly. Transfer
+(above) will become the blocker servo only, a separate mechanism from the
+feeder motor; it is not implemented for this robot yet.
 - Hardware names: intake `intake`, feeder `feeder`, flywheel `up` / `down`
   (`RobotConfig`). All are goBILDA 5203 1620 RPM. Directions, seen from the
   shaft end (the SDK turns a FORWARD motor counter-clockwise on positive
@@ -296,7 +298,9 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   The velocity PIDF runs in `ShooterSubsystem` (motors in
   `RUN_WITHOUT_ENCODER`, FLOAT at zero power):
   `power = kF·target·(nominalVolts/battery) + kP·err + kI·∫err + kD·d(err)/dt`,
-  clamped to 0..1, I term limited to `iLimit`.
+  clamped to 0..1, I term limited to `iLimit`. A non-finite speed or target
+  (e.g. `ticksPerRev` typed as 0 in Panels) writes 0 and resets the
+  controller: the SDK drops NaN powers and would leave the last one applied.
 - Everything is live in Panels: `ShooterConfig` (`targetRpm`, `nearRpm`,
   `farRpm`, `speedToleranceRpm`, `kF/kP/kI/kD`, `iLimit`, `nominalVolts`,
   `ticksPerRev` 103.8), `IntakeConfig.collectPower/ejectPower`,
@@ -306,12 +310,20 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   `measuredRpm` settles just under target, then add `kP` until recovery
   after a shot is quick without oscillation. Watch `Shooter/power`,
   `measuredRpm` and the hub's `battery` in the log.
-- Feeder: `feedOnceReady { shooter.atTarget }` waits for the flywheel to
-  reach speed once, then feeds without pausing until released, so a burst
-  is continuous. No reverse for now.
+- Feeder: `feedOnceReady(ready, spinning)` waits for the flywheel to reach
+  speed once, then feeds without pausing until released, so a burst is
+  continuous; if the flywheel is switched off it stops and waits for speed
+  again. No reverse for now.
+- `subsystems/Scoring.kt` composes intake, feeder and shooter for teleop and
+  autos alike: `feed()` (held on R2; needs the flywheel already spinning)
+  and `burst(rpm)` for autos (spin up, wait for speed at most
+  `ScoringConfig.spinUpTimeoutMs`, feed for `ScoringConfig.burstMs`, then
+  stop the flywheel), e.g.
+  `sequential(drive.holdCommand(shootPose), scoring.burst { ShooterConfig.farRpm })`.
 - "Competition" (`opmodes/CompetitionTeleOp.kt`): driver R1/L1 hold
   collect/eject; operator Cross toggles the flywheel, dpad up/down picks
-  far/near, R2 (hold) shoots — intake and feeder together.
+  far/near, R2 (hold) shoots — intake and feeder together. Shooting takes
+  the intake; a bumper still held when R2 is released takes it back.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
   `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted

@@ -97,6 +97,13 @@ class ShooterSubsystem(
         val c = ShooterConfig
         val now = clock.nanos()
         val error = target - measuredRpm
+        // A Panels typo (ticksPerRev = 0, a NaN preset) must not reach the motors:
+        // the SDK's power cache drops NaN and leaves the last power applied. Reset
+        // too, or a NaN integral would outlive the typo.
+        if (!error.isFinite()) {
+            resetController()
+            return 0.0
+        }
         val dt = if (lastControlNs == Long.MIN_VALUE) 0.0 else (now - lastControlNs) / 1e9
         val volts = batteryVolts()
         val voltageScale = if (volts.isFinite() && volts > 6.0) c.nominalVolts / volts else 1.0
@@ -109,7 +116,7 @@ class ShooterSubsystem(
         lastError = error
         lastControlNs = now
         val output = c.kF * target * voltageScale + c.kP * error + c.kI * integral + c.kD * derivative
-        return output.coerceIn(0.0, 1.0)
+        return if (output.isFinite()) output.coerceIn(0.0, 1.0) else 0.0
     }
 
     private fun resetController() {
@@ -121,7 +128,11 @@ class ShooterSubsystem(
     /** Holds [ShooterConfig.targetRpm] until interrupted. */
     fun spinUp(): Command = spinUp { ShooterConfig.targetRpm }
 
-    /** Holds [rpm], re-read every tick so a preset change applies while spinning, until interrupted. */
+    /**
+     * Holds [rpm], re-read every tick so a preset change applies while spinning.
+     * Never finishes by itself: bound it with `race`/`deadline`, and wait for speed
+     * with `waitUntil { atTarget }`. Ending it clears [targetRpm] (the flywheel coasts).
+     */
     fun spinUp(rpm: () -> Double): Command = logged(
         "Shooter spin up",
         infinite { targetRpm = rpm() }.requiring(this).setEnd { targetRpm = null },
