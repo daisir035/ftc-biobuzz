@@ -24,7 +24,8 @@ import org.firstinspires.ftc.teamcode.core.logging.StateLog
  * its field start pose) to the Pinpoint. The device can still report a sample
  * from before the write, so [ready] stays false until a read confirms the pose
  * (it is written again during init, and gives up after 5 s). Nothing carries
- * over between op-modes, and the IMU is never recalibrated.
+ * over between op-modes. The IMU is recalibrated when Pedro builds the
+ * localizer at INIT (its default `ResetMode.RECALIBRATE_IMU`).
  *
  * **Watchdog**, two kinds of trip, each latched and reported once:
  *  - [fault]: the pose can't be driven on (non-finite, frozen while a path is

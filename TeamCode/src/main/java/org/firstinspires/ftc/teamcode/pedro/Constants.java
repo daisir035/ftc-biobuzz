@@ -87,7 +87,6 @@ public final class Constants {
         c.yPodDirection.set(GoBildaPinpointDriver.EncoderDirection.REVERSED);
         c.globalDistanceUnit.set(DistanceUnit.INCH);
         c.offsetUnits.set(DistanceUnit.INCH);
-        c.resetMode.set(PinpointLocalizer.ResetMode.NONE);
     });
 
 
@@ -131,7 +130,7 @@ public final class Constants {
     public static Follower create(HardwareMap hardwareMap, DoubleSupplier batteryVolts) {
         drivetrainConfig.manualBrakeMode.set(DriveConfig.brakeOnTeleop);
         return new Follower(
-                createLocalizer(hardwareMap, localizerConfig),
+                new PinpointLocalizer(hardwareMap, localizerConfig),
                 drivetrain(hardwareMap, batteryVolts),
                 FORESIGHT_TUNED ? new Foresight(foresightConfig) : null
         );
@@ -139,12 +138,6 @@ public final class Constants {
 
     public static VoltageCompensatedMecanum drivetrain(HardwareMap hardwareMap, DoubleSupplier batteryVolts) {
         return new VoltageCompensatedMecanum(hardwareMap, drivetrainConfig, NOMINAL_VOLTS, batteryVolts);
-    }
-
-    /** Shared by runtime and AutoTune; a pasted config must never re-enable IMU recalibration. */
-    public static PinpointLocalizer createLocalizer(HardwareMap hardwareMap, PinpointConfig config) {
-        config.resetMode.set(PinpointLocalizer.ResetMode.NONE);
-        return new PinpointLocalizer(hardwareMap, config);
     }
 
 }

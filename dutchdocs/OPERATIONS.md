@@ -82,8 +82,9 @@ turn each wheel robot-forward. Fix directions in `pedro/Constants.java`
 
 ## 3. Pinpoint axes and heading (on blocks, then by hand)
 
-- Power the robot on with it still: the Pinpoint calibrates its IMU at power-up
-  and is not recalibrated at INIT.
+- Keep the robot still while pressing INIT: Pedro recalibrates the Pinpoint's
+  IMU when the op-mode builds the localizer (its default
+  `ResetMode.RECALIBRATE_IMU`, about 0.5 s).
 - Init **Drive Only**: Health must reach `Localizer: ok` (it shows
   `waiting for start pose …` or `waiting for Pinpoint READY (status …)`
   meanwhile, five-second limit) and the pose must read (0, 0, 0).
@@ -135,9 +136,8 @@ reading before Stop so the reset pose cannot turn every result into FORWARD.
 Follow that procedure's own instructions; there is no custom Cross/arming step.
 It retains the source procedure's measurement validation limits: zero movement
 can still report FORWARD, so move as instructed and independently verify the axes.
-Runtime and configured AutoTune Foresight/Tests use `Constants.createLocalizer`
-to enforce `ResetMode.NONE`, including when pasted config omits the setting.
-Raw Pinpoint identification follows the source procedure's reset policy unchanged.
+Op-modes and AutoTune build the localizer the same way, with Pedro's default
+reset (IMU recalibrated at INIT); keep the robot still then.
 
 Foresight and Tests drive through
 `VoltageCompensatedMecanum`, which scales every follower power by

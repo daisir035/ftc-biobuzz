@@ -307,14 +307,11 @@ drive.pose / drive.velocity / drive.atPose(target) / drive.toggleFieldCentric()
    (default `Pose.zero()`; an autonomous passes its field start pose) to the
    Pinpoint at every INIT. A read that disagrees before one confirms it is a
    pre-reset sample: the pose is written again, and `ready` stays false until
-   a read confirms it within 0.5 in / 1° (fault after five seconds). The pose
-   is written, not recalibrated: `Constants` sets Pedro's Pinpoint
-   `ResetMode.NONE`, so the IMU keeps its power-up calibration and INIT has
-   no stationary requirement. No pose is restored from a previous op-mode.
-   Runtime and configured AutoTune Foresight/Tests construct through
-   `Constants.createLocalizer`, which enforces NONE even if a pasted config omits it.
-   Raw Pinpoint identification uses its official/team-fork initialization unchanged;
-   its zero offsets and FORWARD baseline are for measurement, not robot defaults.
+   a read confirms it within 0.5 in / 1° (fault after five seconds). The
+   Pinpoint uses Pedro's default `ResetMode.RECALIBRATE_IMU`: building the
+   localizer at INIT recalibrates the IMU and waits 500 ms, so **the robot
+   must be still at INIT**. `localizerConfig` sets no `resetMode`, exactly
+   as AutoTune prints it. No pose is restored from a previous op-mode.
 8. **Shutdown.** `Robot.stop()` stops every subsystem first, then runs the
    crash-report callback, clears Ivy without end handlers (so cleanup cannot
    re-energize hardware), closes the recorder (the last logged pose is the
