@@ -7,7 +7,6 @@ import com.qualcomm.robotcore.hardware.DcMotor
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.DcMotorSimple
 import com.qualcomm.robotcore.hardware.HardwareMap
-import com.qualcomm.robotcore.hardware.VoltageSensor
 import kotlin.math.abs
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.Clock
@@ -24,8 +23,9 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
  * `power = kF · target · (nominalVolts / battery) + kP · error + kI · ∫error + kD · d(error)/dt`
  *
  * clamped to 0..1: a flywheel is never braked by reverse power. Commands set
- * [targetRpm]; [periodic] reads the encoder and battery; [writeHardware]
- * computes and writes the power.
+ * [targetRpm]; [periodic] reads the encoder; [writeHardware] computes and
+ * writes the power. The battery comes from [batteryVolts]; op-modes pass
+ * `{ robot.hubPower.batteryVolts }`, which the hub power sampler reads anyway.
  *
  * Shooting speed eventually comes from [ShotModel.rpmForDistance]; until the
  * model is fitted, callers pass an RPM directly ([spinUp]).
@@ -34,11 +34,11 @@ class ShooterSubsystem(
     private val motorNames: List<String> = RobotConfig.Shooter.MOTORS,
     private val feedbackMotor: String = RobotConfig.Shooter.FEEDBACK_MOTOR,
     private val clock: Clock = Clock.SYSTEM,
+    private val batteryVolts: () -> Double,
 ) : SubsystemBase("Shooter") {
 
     private var motors: List<DcMotorEx> = emptyList()
     private var encoder: DcMotorEx? = null
-    private var voltageSensor: VoltageSensor? = null
 
     /** Commanded flywheel speed; null means stopped. Set by commands only. */
     var targetRpm: Double? = null
@@ -52,8 +52,6 @@ class ShooterSubsystem(
     var power: Double = 0.0
         private set
 
-    private var batteryVolts = Double.NaN
-    private var lastVoltageReadNs = Long.MIN_VALUE
     private var integral = 0.0
     private var lastError = Double.NaN
     private var lastControlNs = Long.MIN_VALUE
@@ -77,19 +75,11 @@ class ShooterSubsystem(
             }
         }
         encoder = motors[motorNames.indexOf(feedbackMotor)]
-        voltageSensor = hardwareMap.voltageSensor.iterator().let { if (it.hasNext()) it.next() else null }
     }
 
     override fun periodic() {
         // Direction applies to the reading too: positive is launching speed.
         measuredRpm = (encoder?.velocity ?: 0.0) / ShooterConfig.ticksPerRev * 60.0
-        // Battery voltage is not in the bulk read: one extra hub read every 100 ms.
-        val now = clock.nanos()
-        val sensor = voltageSensor
-        if (sensor != null && (lastVoltageReadNs == Long.MIN_VALUE || now - lastVoltageReadNs >= 100_000_000L)) {
-            batteryVolts = sensor.voltage
-            lastVoltageReadNs = now
-        }
     }
 
     override fun writeHardware() {
@@ -108,7 +98,8 @@ class ShooterSubsystem(
         val now = clock.nanos()
         val error = target - measuredRpm
         val dt = if (lastControlNs == Long.MIN_VALUE) 0.0 else (now - lastControlNs) / 1e9
-        val voltageScale = if (batteryVolts.isFinite() && batteryVolts > 6.0) c.nominalVolts / batteryVolts else 1.0
+        val volts = batteryVolts()
+        val voltageScale = if (volts.isFinite() && volts > 6.0) c.nominalVolts / volts else 1.0
         if (dt > 0.0) {
             integral += error * dt
             // Anti-windup: the I term alone never exceeds iLimit power.
@@ -150,11 +141,9 @@ class ShooterSubsystem(
         "${measuredRpm.toInt()}/${(targetRpm ?: 0.0).toInt()} RPM"
 
     override fun logState(log: StateLog) {
-        log.put("targetRpm", targetRpm ?: Double.NaN)
-        log.put("measuredRpm", measuredRpm)
-        log.put("atTarget", atTarget)
-        log.put("power", power)
-        log.put("batteryVolts", batteryVolts)
+        super.logState(log)
+        // The automatic log skips a null getter, which would leave the last target on the graph.
+        if (targetRpm == null) log.put("targetRpm", Double.NaN)
     }
 
     private companion object {

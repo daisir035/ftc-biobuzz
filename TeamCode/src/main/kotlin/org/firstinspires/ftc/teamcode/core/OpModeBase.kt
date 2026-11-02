@@ -6,10 +6,8 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.HardwareDevice
 import com.qualcomm.robotcore.hardware.HardwareMap
-import com.qualcomm.robotcore.hardware.VoltageSensor
 import com.qualcomm.robotcore.util.RobotLog
 import org.firstinspires.ftc.teamcode.RobotConfig
-import org.firstinspires.ftc.teamcode.core.logging.FieldView
 import org.firstinspires.ftc.teamcode.core.logging.TelemetryBag
 import org.firstinspires.ftc.teamcode.subsystems.DriveTelemetrySource
 
@@ -66,16 +64,9 @@ abstract class OpModeBase : LinearOpMode() {
     /** Set false to suppress the live robot/path drawing on the Panels field view. */
     protected open val publishFieldView: Boolean get() = true
 
-    /** Rumble both gamepads once when the match reaches endgame. */
-    protected open val endgameRumble: Boolean get() = true
-
-    private var voltageSensor: VoltageSensor? = null
     private var cachedVoltage = Double.NaN
-    private var lastVoltageReadNs = Long.MIN_VALUE
     private val fieldView = FieldView()
     private var fieldViewDrive: DriveTelemetrySource? = null
-    private var startNanos = 0L
-    private var endgameRumbled = false
     private var telemetryFailures = 0
 
     /** The phase breakdown is in the flight log; `tools/logs/analyze_wpilog.py` reports it. */
@@ -108,22 +99,10 @@ abstract class OpModeBase : LinearOpMode() {
         }
     }
 
-    private fun firstVoltageSensor(): VoltageSensor? = try {
-        val iterator = hardwareMap.voltageSensor.iterator()
-        if (iterator.hasNext()) iterator.next() else null
-    } catch (_: Throwable) {
-        null
-    }
-
-    /** Battery voltage, throttled to one read per 250 ms; runs regardless of telemetry flags. */
+    /** Battery voltage: the Control Hub's input voltage, which [Robot.hubPower] reads anyway. */
     private fun refreshVoltage() {
-        val sensor = voltageSensor ?: return
-        val now = System.nanoTime()
-        if (!cachedVoltage.isNaN() && lastVoltageReadNs != Long.MIN_VALUE && now - lastVoltageReadNs < 250_000_000L) {
-            return
-        }
-        cachedVoltage = sensor.voltage
-        lastVoltageReadNs = now
+        val hubVolts = robot.hubPower.batteryVolts
+        if (hubVolts.isFinite()) cachedVoltage = hubVolts
     }
 
     private fun publishHealth(includeInitOnly: Boolean) {
@@ -133,6 +112,10 @@ abstract class OpModeBase : LinearOpMode() {
                 val last = robot.lastCommandFault
                 put("command faults", "${robot.commandFaultCount} (last: ${last?.javaClass?.simpleName}: ${last?.message})")
             }
+            if (robot.subsystemFaultCount > 0) {
+                val last = robot.lastSubsystemFault
+                put("subsystem faults", "${robot.subsystemFaultCount} (last: ${last?.javaClass?.simpleName}: ${last?.message})")
+            }
             for (subsystem in robot.subsystems()) {
                 val health = subsystem.health()
                 if (health != null) put(subsystem.name, health)
@@ -140,15 +123,6 @@ abstract class OpModeBase : LinearOpMode() {
             if (includeInitOnly && !cachedVoltage.isNaN() && cachedVoltage < LOW_BATTERY_WARN_VOLTS) {
                 put("battery WARNING", "LOW — swap before the match")
             }
-        }
-    }
-
-    private fun updateEndgameRumble() {
-        if (!endgameRumble || endgameRumbled) return
-        if (robot.clock.nanos() - startNanos >= ENDGAME_START_NANOS) {
-            driver.rumbleBlips(3)
-            operator.rumbleBlips(3)
-            endgameRumbled = true
         }
     }
 
@@ -170,7 +144,6 @@ abstract class OpModeBase : LinearOpMode() {
             Preflight.check(hardwareMap, requiredDevices)
             configure()
             robot.init()
-            voltageSensor = firstVoltageSensor()
             fieldViewDrive = robot.subsystems().firstOrNull { it is DriveTelemetrySource } as? DriveTelemetrySource
 
             telemetry.addLine("Init complete — ${robot.subsystems().size} subsystems")
@@ -208,8 +181,6 @@ abstract class OpModeBase : LinearOpMode() {
 
         try {
             robot.start()
-            startNanos = robot.clock.nanos()
-            endgameRumbled = false
             robot.recordEvent("start")
             onStart()
             while (opModeIsActive()) {
@@ -218,10 +189,7 @@ abstract class OpModeBase : LinearOpMode() {
                         driver.update()
                         operator.update()
                     },
-                    control = {
-                        onLoop()
-                        updateEndgameRumble()
-                    },
+                    control = { onLoop() },
                     telemetry = {
                         refreshVoltage()
                         publishLoopTiming()
@@ -243,8 +211,6 @@ abstract class OpModeBase : LinearOpMode() {
     private companion object {
         /** Resting voltage below which the init screen warns to swap the battery. */
         const val LOW_BATTERY_WARN_VOLTS = 12.0
-        /** Endgame is the last 30 s of the 2:00 driver period. */
-        const val ENDGAME_START_NANOS = 90_000_000_000L
     }
 }
 

@@ -64,8 +64,10 @@ Create `subsystems/IntakeSubsystem.kt`:
 ```kotlin
 class IntakeSubsystem : SubsystemBase("Intake") {
     private lateinit var roller: DcMotorEx
-    private var rollerPower = 0.0
-    private var ballSeen = false
+    var rollerPower = 0.0
+        private set
+    var ballSeen = false
+        private set
 
     override fun init(hardwareMap: HardwareMap) {
         roller = hardwareMap.get(DcMotorEx::class.java, "intakeRoller").apply {
@@ -93,11 +95,6 @@ class IntakeSubsystem : SubsystemBase("Intake") {
 
     override fun onCommandFault() { rollerPower = 0.0 }
     override fun stop() { rollerPower = 0.0; roller.power = 0.0 }
-
-    override fun logState(log: StateLog) {
-        log.put("rollerPower", rollerPower)
-        log.put("ballSeen", ballSeen)
-    }
 }
 ```
 
@@ -107,12 +104,15 @@ Register it in your op-mode's `configure()` (or `configureTeleop()`):
 Rules:
 
 - `periodic()` reads, commands decide, `writeHardware()` writes.
+- Public read-only scalar state logs automatically. Override `logState` only
+  for arrays or specific channel names.
 - Every command that touches the subsystem says `requiring(this)`, so Ivy
   lets only one of them run. Use `Commands.lazy { … }` when the command
   depends on state known only when it starts.
-- `setEnd` runs when the command finishes or is replaced, but **not** when
-  the op-mode stops or a command crashes: `stop()` and `onCommandFault()`
-  make the mechanism safe then.
+- `setEnd` runs when the command finishes, is replaced, or throws (a
+  `logged()` command only), but **not** when the op-mode stops or an
+  unlogged command crashes: `stop()` and `onCommandFault()` make the
+  mechanism safe then.
 - Only make things safe in `setEnd` (power to 0, blocker closed). Ivy can
   run it for a command that never started, or twice, so it must not start
   anything or count anything. AI-GUIDE.md shows the pattern if you need to.
@@ -124,16 +124,19 @@ Rules:
 In `configure()` / `configureTeleop()`, using Ivy commands:
 
 ```kotlin
-driver.button(Button.A).onTrue(intake.grab())                 // schedule on press
-driver.button(Button.LEFT_BUMPER).whileTrue(intake.eject())   // cancel on release
-driver.button(Button.X).toggleOnTrue(lift.raise())
-driver.trigger { driver.rightTrigger > 0.5 }.whileTrue(shooter.spinUp())
-(driver.button(Button.BACK) and driver.button(Button.Y)).onTrue(instant { … })
+driver.button(Button.CROSS).onTrue(intake.grab())             // schedule on press
+driver.button(Button.L1).whileTrue(intake.eject())            // cancel on release
+driver.trigger { driver.r2 > 0.5 }.whileTrue(shooter.spinUp())
+(driver.button(Button.CREATE) and driver.button(Button.TRIANGLE)).onTrue(instant { … })
 ```
 
-Bindings lock at start. Read sticks directly (`driver.leftStickY` is +up).
-`TeleOpBase` already binds Back+Y (heading reset), Back+B (field-centric) and
-installs stick driving as the drive's default command.
+We only use PS5 controllers, so buttons have PS5 names. Bindings lock at
+start. Read sticks directly (`driver.leftStickY` is +up), and buttons with
+`driver.held(Button.X)` / `driver.pressed(Button.X)` (edge since last loop).
+`TeleOpBase` already binds Create+Triangle (heading reset), Create+Circle
+(field-centric) and installs stick driving as the drive's default command.
+Match teleop also buzzes both controllers twice at 1:00 left (FLOWER
+ownership unlocks) and three times at 0:20 left (`TeleOpBase.onStart`).
 
 ## Compose an autonomous
 
@@ -150,16 +153,16 @@ private fun routine(): Command = logged(
     "Score preload",
     race(
         sequential(
-            logged("Start delay", monotonicWaitMs(startDelaySec * 1000.0)),
+            logged("Start delay", waitMs(startDelaySec * 1000.0)),
             race(
                 drive.followCommand(toScore(), name = "Drive to score"),
-                logged("Drive to score time limit", monotonicWaitMs(4_000.0)), // step timeout
+                logged("Drive to score time limit", waitMs(4_000.0)), // step timeout
             ),
             drive.holdCommand(score, name = "Settle at score"),               // wait for arrival
             instant { robot.recordEvent("AUTO: scored") },
             drive.turnToCommand(alliance.mirror(Math.toRadians(90.0)), name = "Face the wall"),
         ),
-        logged("Routine time limit", monotonicWaitMs(29_000.0)),             // whole-routine timeout
+        logged("Routine time limit", waitMs(29_000.0)),             // whole-routine timeout
     ),
 )
 ```
@@ -169,117 +172,33 @@ take a `name`; wrap everything else worth seeing with `logged(...)`.
 
 Pass the start pose to the localizer in `configure()`:
 `LocalizerSubsystem(follower, ..., startingPose = start)`. It is written to the
-Pinpoint at INIT, so place the robot before pressing INIT. In `onStart`: refuse
-to run if `!Constants.FORESIGHT_TUNED` or `!localizer.ready` (start pose not
-yet confirmed), `Scheduler.schedule(...)` and check `Scheduler.isScheduled(...)`. In `onLoop`, stop the op-mode once the
-routine is no longer scheduled.
+Pinpoint at INIT, so place the robot before pressing INIT; nudging it into
+place during init is fine, the pose snaps back to the start pose. Pass
+`onStatusFault = {}` so a Pinpoint status problem is only logged and the auto
+keeps driving; only a lost pose (`onFault`) cancels it. In `onStart`: refuse to
+run if `!Constants.FORESIGHT_TUNED`. Then, from `onLoop`, start the routine once
+`localizer.ready`, or after one second anyway unless `localizer.fault` is set
+(START pressed right after INIT): `Scheduler.schedule(...)` and check
+`Scheduler.isScheduled(...)`. Stop the op-mode once the routine is no longer
+scheduled.
 
-- **Waits:** use `monotonicWaitMs(ms)` from `core/`, not Ivy's `waitMs`,
-  which is timed by the wall clock and ends early or stalls if the hub's
-  time is set mid-match.
+- **Waits:** Ivy's `waitMs(ms)`.
 - **Markers** (do something part-way along a path, once):
   `deadline(drive.followCommand(path), sequential(waitUntil { drive.pathProgress() >= 0.5 }, instant { lift.up() }))`.
   If the path ends or is cancelled first, the marker is dropped.
 - **Completion:** `followCommand` ends at Pedro's *parametric end*, which is
   not arrival. Follow it with `holdCommand(pose)` when arrival matters.
-  `turnToCommand` throws on timeout, which aborts the whole routine.
+  `turnToCommand` ends on its timeout too and the routine moves on.
 - **Turning along a path:** `.linear(a, b)` (see `backPath()` in the
   example), or `.constant(...)` to keep one heading.
 - **Alliances:** one `@Autonomous` class per alliance/routine; the BLUE copy
   overrides `initialAlliance` only. Map poses with `alliance.poses()`, not
   `PoseFactory.mirrorX`.
-- **Where was the robot when the camera saw that?** `localizer.poseAt(captureNanos)`
-  interpolates the last few seconds of poses.
 
-## Log a value
+## Logging
 
-Anything a subsystem knows goes in `logState`; it becomes `<Subsystem>/<name>`
-in the WPILOG (at most 100 samples a second):
-
-```kotlin
-override fun logState(log: StateLog) {
-    log.put("goalTicks", goal)        // double, long, boolean or string
-    log.put("state", state.name)      // strings are only written when they change
-}
-```
-
-For a one-off moment, record an event with its exact time:
-`robot.recordEvent("AUTO: preload scored")`.
-
-## Trace commands in the log
-
-Wrap a command with `logged` (`core/logging`) to put its runs in the WPILOG:
-
-```kotlin
-import org.firstinspires.ftc.teamcode.core.logging.logged
-
-fun raise(): Command = logged("Lift raise", Command.build().requiring(this).setDone { atTop })
-val auto = logged("Left auto", sequential(drive.followCommand(path, name = "Drive to bar"), lift.raise()))
-Scheduler.schedule(auto)   // schedule, cancel, bind and compare this instance
-```
-
-- The drive's `teleopCommand`, `followCommand`, `holdCommand`,
-  `turnToCommand` and `robotCentricFallbackCommand` are already logged; give
-  them a `name` instead of wrapping them again.
-- **Only wrapped commands appear.** A logged group does not show its children:
-  wrap each step you want to see. Skip trivial internals (`instant` markers,
-  a `waitUntil` inside a marker); record an event for a moment instead.
-- Keep the instance: `Scheduler.cancel(inner)` or `isScheduled(inner)` on the
-  unwrapped command does nothing, because Ivy only knows the wrapper.
-  `logged` on an already logged command renames it.
-
-Channels:
-
-| Channel | Meaning |
-|---|---|
-| `commands/events` | One record per change: `START #7 Drive to bar`, `FINISH #7 …`, `INTERRUPT #7 …`, `SUSPEND`/`RESUME #7 …`, `FAIL #7 … in execute: IllegalStateException: …`, `ABORT #7 …: command fault` / `op-mode stop` |
-| `commands/active` | The traced executions running after each record, one `#id name` per line (`(suspended)` when suspended) |
-| `commands/lost` | Records dropped because too much happened between two loops; above 0 the history is incomplete |
-
-- `#id` numbers each run from 1 per op-mode, so two runs of the same command,
-  or two commands with the same name, stay apart.
-- **FINISH means the command's own `done` returned true**, not that the robot
-  arrived: a hold that timed out, or a path at its parametric end, also
-  finishes. Check pose and `follow/*` for arrival.
-- **FAIL** is the command whose `start`, `execute`, `done` or `end` threw; a
-  logged group it ran inside also fails, marked `(from #child)`. **ABORT** is
-  bookkeeping for commands that were still running when the fault policy or
-  the op-mode stop cleared Ivy: they did not fail, and their end handlers did
-  not run.
-- Nothing records why a command was interrupted (driver takeover, a group's
-  timeout, cancel) or that a schedule was rejected: Ivy doesn't say. Read the
-  surrounding records and `events`.
-
-## Review a WPILOG in MaxScope
-
-Run `make viewer` and open `http://127.0.0.1:8008`. Choose an already-pulled
-run or **Open WPILOG** to inspect another file. Field playback, graphs,
-commands, events and gamepads share one time cursor. The field reads raw
-Pedro `pose` in inches/radians: origin at the audience-left corner, +X right,
-+Y away, heading counterclockwise. No AdvantageScope coordinate conversion
-is needed. Robot logging remains compatible with both viewers.
-
-The first draft runs locally with Python 3.10+ and no extra dependencies.
-See [MaxScope](../tools/maxscope/README.md) for controls, limits and tests.
-
-## Download a WPILOG and open it in AdvantageScope
-
-1. Connect to the Control Hub over USB or join its Wi-Fi.
-2. `make pull-logs 2` pulls the newest match's logs into `robot-logs/`;
-   `make pull-logs` copies all of them. `make viewer` summarizes them.
-3. Open the `.wpilog` in AdvantageScope (File → Open Log).
-4. **2D field:** drag `Field/Robot` onto a 2D Field tab with an FTC field
-   (default *Center/Rotated* coordinates). It is already in the FTC frame:
-   Pedro's (0, 0) draws at the bottom-left corner as seen from the audience,
-   and heading 0 points right along the audience wall. Don't drag `pose`:
-   AdvantageScope reads its inches as metres. **Graphs:** use `pose` (inches),
-   `velocity`, `driveMode`, `follow/translationalErrorIn`, `battery`,
-   `loop/totalNanos`, and your subsystem channels. `events` is the timeline.
-5. **What was the robot trying to do?** Open `commands/events` in a table
-   (or drag it onto a line graph) next to `driveMode`, `pose` and motor
-   channels, and scrub to the moment in question; `commands/active` shows
-   every traced command running then. MaxScope (`make viewer`) lists each execution
-   with start, end and outcome, and failures first.
+Logging is automatic; see [dutchdocs/LOGGING.md](LOGGING.md) for state logging,
+WPILOG channels, command history, viewers and post-match debugging.
 
 ## Commands and faults
 
@@ -287,15 +206,23 @@ See [MaxScope](../tools/maxscope/README.md) for controls, limits and tests.
   priorities; the localizer-fault fallback is the only command with one.
 - A default command never replaces a running command; it comes back when the
   subsystem is free.
-- **If a command throws an `Exception`** (for example `error("…")` or
-  `require(...)`), the robot clears every command, halts every subsystem
-  (`onCommandFault()`), records `COMMAND FAULT` in the log, and keeps looping
-  with defaults. In auto that means the routine is gone and the op-mode stops.
-  Health telemetry shows the count.
-- **An `Error` ends the op-mode.** `TODO()` throws `NotImplementedError`,
-  which is an `Error`: a command or binding still containing `TODO()` stops
-  every motor, records `LOOP CRASHED` with the stack trace, and ends the run.
-  Replace every `TODO()` before driving.
+- **If a `logged()` command throws an `Exception`** (for example
+  `error("…")` or `require(...)`), only that command ends. Its subsystems are
+  halted (`onCommandFault()`), the log gets `COMMAND FAULT: <name>: …`, and an
+  auto moves on to its next step. Wrap every routine step in `logged()`; the
+  drive commands already are.
+- An exception from a binding or an unlogged command clears every command
+  and halts every subsystem instead. Defaults come back; in auto the routine
+  is gone and the op-mode stops.
+- **If a subsystem's `periodic()` or `writeHardware()` throws,** the log gets
+  `SUBSYSTEM FAULT` and the other subsystems keep running. After a failed
+  write that subsystem's outputs are zeroed (`onWriteFault()`). The drive
+  keeps following its path, so a one-tick glitch costs one tick.
+- Health telemetry shows both counts.
+- **An `Error` ends the op-mode,** and so does an exception from `onLoop()`.
+  `TODO()` throws `NotImplementedError`, which is an `Error`: code still
+  containing `TODO()` stops every motor, records `LOOP CRASHED` with the stack
+  trace, and ends the run. Replace every `TODO()` before driving.
 - **If the localizer fails** in teleop, the driver keeps robot-centric sticks
   for the rest of the run; paths, holds and turns refuse to start.
 
@@ -308,12 +235,12 @@ Everything else is Ivy or Pedro. Each remaining helper has one job:
 | `core/Robot`, `OpModeBase` | Loop order (bulk reads → reads → input → commands → writes → telemetry → log), init lockout, Ivy reset, fault policy, shutdown order |
 | `SubsystemBase` | The read/write/stop/log lifecycle and passive default commands |
 | `MecanumDriveSubsystem` | The one drive owner: stick shaping, field-centric, drive commands with requirements, interruption cleanup and measured completion |
-| `LocalizerSubsystem`, `PoseHistory` | Start pose written at every INIT, Pinpoint readiness/fault watchdog, pose history for camera latency |
+| `LocalizerSubsystem` | Start pose written at every INIT, Pinpoint readiness/fault watchdog |
 | `GamepadEx`, `Trigger` | Deadbanded sticks, edges, and button bindings that schedule Ivy commands (Ivy has none) |
 | `Alliance` | RED→BLUE transform with the season's symmetry (mirror or rotate; Pedro's `mirrorX` only mirrors) |
-| `FlightRecorder`, `WpiLogWriter`, `WpiStruct`, `StateLog` | WPILOG files for AdvantageScope |
+| `FlightRecorder`, `WpiLogWriter`, `WpiStruct`, `StateLog`, `AutomaticStateLog`, `Events` | WPILOG files for MaxScope and AdvantageScope: automatic subsystem state and timestamped events ([Logging](LOGGING.md)) |
 | `logged`, `CommandHistory` | Command history for traced commands (Ivy has no lifecycle hooks or names) |
-| `FieldView`, `TelemetryBag` | Panels field drawing and throttled DS/Panels telemetry |
+| `TelemetryBag`, `FieldView` | Throttled DS/Panels telemetry and Panels field drawing |
 | `Preflight`, `LoopProfile` | Missing-device listing, loop timing |
 | `pedro/Constants.java`, `pedro/Tuning.java` | Pedro's configuration and AutoTune registration, in the Quickstart layout |
 
@@ -328,8 +255,8 @@ object ShooterConfig {
 }
 ```
 
-Panels edits these while the robot runs. **They are not saved**: an app
-restart or hot reload puts back what is in the code. When a value is right,
+Panels edits these while the robot runs. **They are not saved**: an op-mode
+restart, app restart or hot reload puts back what is in the code. When a value is right,
 type it into the file. The code is always the truth about how the robot is
 tuned. Don't `@Pinned` config objects.
 
@@ -378,20 +305,20 @@ still an unconfigured skeleton** — its `init` fails explicitly.
 - Tuning: in "Duo Shooter Test" set kP = kI = 0, raise `kF` until
   `measuredRpm` settles just under target, then add `kP` until recovery
   after a shot is quick without oscillation. Watch `Shooter/power`,
-  `measuredRpm`, `batteryVolts` in the log.
+  `measuredRpm` and the hub's `battery` in the log.
 - Feeder: `feedOnceReady { shooter.atTarget }` waits for the flywheel to
   reach speed once, then feeds without pausing until released, so a burst
   is continuous. No reverse for now.
-- "Competition" (`opmodes/CompetitionTeleOp.kt`): driver RB/LB hold
-  collect/eject; operator A toggles the flywheel, dpad up/down picks
-  far/near, right trigger (hold) shoots — intake and feeder together.
+- "Competition" (`opmodes/CompetitionTeleOp.kt`): driver R1/L1 hold
+  collect/eject; operator Cross toggles the flywheel, dpad up/down picks
+  far/near, R2 (hold) shoots — intake and feeder together.
 - "Shooter Test" runs the standalone `shoot` motor with its own encoder.
 - Shooter will accept target RPM from `ShotModel.rpmForDistance` (in
   `ShooterSubsystem.kt`), a distance-to-speed function still to be fitted
   from shots at measured distances (it returns null until then).
-- Turret owns all mechanically linked turret servos. It will keep a short
-  timestamped history of its servo-encoder angle and give `HiveTracker` a
-  lookup into it, so each camera frame is placed at its capture time.
+- Turret owns all mechanically linked turret servos. It will aim with
+  `GoalAim` (below) and command angles through `TurretSubsystem.wrapToTravel`
+  so it never winds past its travel.
 - Once CAD defines their actuators: resolve them with `hardwareMap.get` in
   `init`, add logged Ivy command factories requiring the subsystem, implement
   reads/writes and fault/stop cleanup, then register in `configure()`.
@@ -402,23 +329,24 @@ tests put fake devices (`MotorProbe`, `ServoProbe` in `test/…/core/sim/`)
 into a `FakeHardwareMap`. Add closed-loop control, homing, soft limits or profiles only once you can
 validate them on the mechanism.
 
-## Vision layout
+## Vision
 
-Season vision code that runs in a match is in `vision/`:
+The Limelight 3A rides on the turret. `subsystems/LimelightSubsystem.kt` is
+the device adapter: freshness and every AprilTag's `tx`/`ty`. `vision/GoalAim.kt`
+decides where to aim:
 
-- `BallCamera*`, `LensIntrinsics`: the USB ball camera on the SDK's color-blob processor, its Panels
-  settings, and lens calibration.
-- `BiobuzzAprilTags`: season tag identities and FIRST's cluster geometry.
-- `Hive*`, `GoalGeometry`: HIVE goal tracking for the turret-mounted Limelight. `HiveConfig`
-  holds the camera mount and thresholds; `GoalGeometry` places each tag's
-  implied goal (its CELL's opening centre) on the robot through that mount and
-  the turret angle at capture time; `HiveState` infers which CELL of each HIVE
-  is raised from tag heights, with hysteresis and tip counts; `HiveTracker`, a
-  subsystem, fuses each alliance's goal and exposes both alliances to op-modes.
-Tests mirror these packages. The reusable Limelight device adapter is
-`subsystems/LimelightSubsystem.kt`. The diagnostic op-modes and their tooling (lab
-records, tag-sighting history, `VisionDiagnosticsConfig`) live together in
-`opmodes/diagnostics/`; `SettingsChangeLog` is in `core/logging/`.
+- **Our tags in view** (RED 30–37, BLUE 38–45): their CELL is raised (a
+  lowered CELL's tags face away). Aim at the average `tx` of its visible tags.
+  If both of our CELLs show, the higher one (larger `ty`) wins.
+- **No goal in view:** aim at our HIVE's pivot from the odometry pose
+  (`GoalAim.pivotBearingRad`). Both CELLs are near it, so whichever is raised
+  comes into view. Never shoot without a goal.
+
+That is all of it on purpose. The earlier HIVE estimator (3D goal from tag
+poses, raised/lowered voting, held goals, latency compensation) and the USB
+ball camera are at git tag `vision-full`; restore files from there if they
+are ever needed. The **Vision Test** op-mode (`opmodes/diagnostics/`) shows
+every tag and each alliance's goal.
 
 ## Sensors and I²C
 

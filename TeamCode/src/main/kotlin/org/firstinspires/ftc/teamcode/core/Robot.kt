@@ -8,13 +8,16 @@ import java.io.PrintWriter
 import java.io.StringWriter
 import kotlin.math.max
 import org.firstinspires.ftc.teamcode.core.logging.CommandHistory
+import org.firstinspires.ftc.teamcode.core.logging.Events
 import org.firstinspires.ftc.teamcode.core.logging.FlightRecorder
+import org.firstinspires.ftc.teamcode.core.logging.LoggedCommand
 
 /**
  * The hardware, subsystems and loop of one op-mode run.
  *
  *  - Owns the list of [SubsystemBase]s and their lifecycle
  *  - Puts every Lynx module in MANUAL bulk caching and clears the cache once per tick
+ *  - Samples each hub's input current and voltage ([hubPower])
  *  - Runs Ivy's static [Scheduler] at a fixed point in the loop, and resets it
  *    on construction and stop so no command outlives its op-mode
  *  - Owns the optional [FlightRecorder]
@@ -29,6 +32,10 @@ class Robot(
     private val subsystems = mutableListOf<SubsystemBase>()
     private var hubs: List<LynxModule> = emptyList()
 
+    /** Hub input current and voltage, read in the periodic phase; empty until [init]. */
+    var hubPower = HubPower(emptyList(), clock)
+        internal set
+
     var alliance: Alliance = Alliance.RED
 
     init {
@@ -36,13 +43,22 @@ class Robot(
         // and Sloth reloads. Nothing from a previous run may execute here.
         Scheduler.reset()
         CommandHistory.reset(clock)
+        Events.reset()
+        LoggedCommand.onFault = ::containCommandFault
     }
 
-    /** Commands aborted by a thrown exception this op-mode. */
+    /** Commands that threw an exception this op-mode. */
     var commandFaultCount: Int = 0
         private set
 
     var lastCommandFault: Throwable? = null
+        private set
+
+    /** Exceptions from a subsystem's periodic() or writeHardware() this op-mode. */
+    var subsystemFaultCount: Int = 0
+        private set
+
+    var lastSubsystemFault: Throwable? = null
         private set
 
     var telemetryFaultCount: Int = 0
@@ -67,9 +83,8 @@ class Robot(
     private var initialized = false
     private var stopped = false
     private var lastOverrunEventNs = Long.MIN_VALUE
-    private var lastTelemetryFaultEventNs = Long.MIN_VALUE
-    private var lastCommandFaultEventNs = Long.MIN_VALUE
-    private var lastCommandFaultMessage: String? = null
+    private var lastFaultEventNs = Long.MIN_VALUE
+    private var lastFaultMessage: String? = null
 
     /**
      * Register a subsystem. Must happen before [init] (in the op-mode's
@@ -78,12 +93,6 @@ class Robot(
     fun <T : SubsystemBase> register(subsystem: T): T {
         check(!initialized) {
             "Cannot register ${subsystem.name} after Robot.init() — register subsystems in configure()."
-        }
-        subsystem.registerAfter?.let { required ->
-            check(subsystems.any { required.isInstance(it) }) {
-                "${subsystem.name} must be registered after a ${required.simpleName} — " +
-                    "its writeHardware() depends on the ${required.simpleName} having run first this tick."
-            }
         }
         subsystems += subsystem
         return subsystem
@@ -106,18 +115,20 @@ class Robot(
             clock = clock,
             directory = directory,
         )
+        Events.sink = flightRecorder?.let { recorder -> recorder::event }
         if (flightRecorder != null) CommandHistory.startRecording()
     }
 
     /** Write a timestamped message to the WPILOG `events` channel. */
     fun recordEvent(message: String) {
-        flightRecorder?.event(message)
+        Events.record(message)
     }
 
     fun closeFlightRecorder() {
         try {
             flightRecorder?.close()
         } finally {
+            Events.reset()
             flightRecorder = null
             CommandHistory.stopRecording()
         }
@@ -128,6 +139,7 @@ class Robot(
         initialized = true
         hubs = hardwareMap.getAll(LynxModule::class.java)
         for (hub in hubs) hub.bulkCachingMode = LynxModule.BulkCachingMode.MANUAL
+        hubPower = HubPower.of(hubs, clock)
         for (s in subsystems) s.init(hardwareMap)
     }
 
@@ -140,7 +152,7 @@ class Robot(
     /**
      * One main-loop tick. The order is fixed:
      *  1. Clear Lynx bulk caches so all reads this tick return fresh data
-     *  2. [SubsystemBase.periodic] — reads and state updates
+     *  2. [hubPower] sample, then [SubsystemBase.periodic] — reads and state updates
      *  3. [input] — gamepad edges and trigger bindings
      *  4. [control] — the op-mode's `onLoop()`
      *  5. Default commands, then [Scheduler.execute] — commands decide targets
@@ -148,12 +160,20 @@ class Robot(
      *  7. [telemetry] — observe-only; a failure is counted, never fatal
      *  8. Flight recorder sample
      *
-     * An [Exception] from phase 3 or 5 aborts every command: the scheduler is
-     * cleared, every subsystem gets [SubsystemBase.onCommandFault], and the
-     * reason is recorded. The loop continues and defaults resume next tick.
-     * Exceptions from 2, 4 and 6, and any [Error] (including Kotlin's `TODO()`,
-     * which throws [NotImplementedError]), propagate out of this call: the
-     * op-mode must then call [stopAfterCrash] and end.
+     * Only an [Error] or an `onLoop()` exception ends the op-mode, so an auto keeps going:
+     *  - An [Exception] from a `logged()` command ends only that command, and
+     *    its subsystems get [SubsystemBase.onCommandFault] (see [LoggedCommand]).
+     *  - An [Exception] escaping phase 3 or 5 any other way (a binding, an
+     *    unlogged command) aborts every command: the scheduler is cleared and
+     *    every subsystem gets [SubsystemBase.onCommandFault]. Defaults resume
+     *    next tick.
+     *  - An [Exception] from one subsystem's periodic() or writeHardware() is
+     *    recorded and the other subsystems still run. After a failed write it
+     *    gets [SubsystemBase.onWriteFault]: the drive zeroes its motors for
+     *    that tick and keeps following its path.
+     * Exceptions from 4 (`onLoop()`), and any [Error] (including Kotlin's
+     * `TODO()`, which throws [NotImplementedError]), propagate out of this
+     * call: the op-mode must then call [stopAfterCrash] and end.
      */
     fun loop(
         input: () -> Unit = {},
@@ -166,7 +186,8 @@ class Robot(
         clearBulkCaches()
         phaseStart = mark(phaseStart, LoopPhase.CLEAR_CACHES)
 
-        for (s in subsystems) s.periodic()
+        hubPower.sample()
+        for (s in subsystems) containSubsystem(s, "periodic") { s.periodic() }
         phaseStart = mark(phaseStart, LoopPhase.PERIODIC)
 
         commandPhase(input)
@@ -184,7 +205,7 @@ class Robot(
         }
         phaseStart = mark(phaseStart, LoopPhase.SCHEDULER)
 
-        for (s in subsystems) s.writeHardware()
+        for (s in subsystems) containSubsystem(s, "writeHardware") { s.writeHardware() }
         phaseStart = mark(phaseStart, LoopPhase.WRITE_HARDWARE)
 
         try {
@@ -229,6 +250,7 @@ class Robot(
      */
     fun initTick() {
         clearBulkCaches()
+        hubPower.sample()
         for (s in subsystems) s.initPeriodic()
     }
 
@@ -250,40 +272,60 @@ class Robot(
         }
     }
 
+    /** A logged command threw: it ends by itself; make the subsystems it drives safe. */
+    private fun containCommandFault(command: LoggedCommand, e: Exception) {
+        for (requirement in command.requirements()) {
+            if (requirement is SubsystemBase) safe(requirement)
+        }
+        commandFaultCount++
+        lastCommandFault = e
+        recordFault(e, "COMMAND FAULT: ${command.name}: ${e.javaClass.simpleName}: ${e.message} (command ended)")
+    }
+
     /**
-     * Ivy has no per-command fault isolation, and its state is not trustworthy
-     * after a throw mid-execute. Clear everything, stop every mechanism, and
-     * record why. No command end handler runs.
+     * An exception got past every logged() wrapper. Ivy's state is not
+     * trustworthy after a throw mid-execute: clear everything, stop every
+     * mechanism, and record why. No command end handler runs.
      */
     private fun abortCommands(e: Exception) {
         try { Scheduler.reset() } catch (_: Throwable) { /* keep safing */ }
-        for (s in subsystems) {
-            try { s.onCommandFault() } catch (_: Throwable) { /* safe every subsystem */ }
-        }
+        for (s in subsystems) safe(s)
         // Bookkeeping only: the traced executions Ivy dropped without end handlers.
         CommandHistory.abortAll("command fault")
         commandFaultCount++
         lastCommandFault = e
-        val message = "COMMAND FAULT: ${e.javaClass.simpleName}: ${e.message} (commands cleared, subsystems halted)"
-        RobotLog.ee("Robot", e, "$message (#$commandFaultCount)")
+        recordFault(e, "COMMAND FAULT: ${e.javaClass.simpleName}: ${e.message} (commands cleared, subsystems halted)")
+    }
+
+    private inline fun containSubsystem(s: SubsystemBase, phase: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: Exception) {
+            if (phase == "writeHardware") try { s.onWriteFault() } catch (_: Throwable) { /* still record it */ }
+            subsystemFaultCount++
+            lastSubsystemFault = e
+            recordFault(e, "SUBSYSTEM FAULT: ${s.name}.$phase: ${e.javaClass.simpleName}: ${e.message}")
+        }
+    }
+
+    private fun safe(s: SubsystemBase) {
+        try { s.onCommandFault() } catch (_: Throwable) { /* safe the rest anyway */ }
+    }
+
+    /** A repeating fault (one per tick) is logged once a second. */
+    private fun recordFault(e: Throwable, message: String) {
         val now = clock.nanos()
-        if (message != lastCommandFaultMessage || throttle(lastCommandFaultEventNs, now)) {
-            lastCommandFaultMessage = message
-            lastCommandFaultEventNs = now
+        if (message != lastFaultMessage || throttle(lastFaultEventNs, now)) {
+            lastFaultMessage = message
+            lastFaultEventNs = now
+            RobotLog.ee("Robot", e, message)
             recordEvent(message)
         }
     }
 
     private fun recordTelemetryFault(t: Throwable) {
         telemetryFaultCount++
-        if (telemetryFaultCount <= 5) {
-            RobotLog.ee("Robot", t, "Telemetry fault contained (#$telemetryFaultCount)")
-        }
-        val now = clock.nanos()
-        if (throttle(lastTelemetryFaultEventNs, now)) {
-            lastTelemetryFaultEventNs = now
-            recordEvent("TELEMETRY FAULT: ${t.javaClass.simpleName}: ${t.message}")
-        }
+        recordFault(t, "TELEMETRY FAULT: ${t.javaClass.simpleName}: ${t.message}")
     }
 
     private fun recordRecorderFault(t: Throwable) {
@@ -294,6 +336,7 @@ class Robot(
         } catch (_: Throwable) {
             // The recorder has already faulted; shutdown is best-effort.
         }
+        Events.reset()
         flightRecorder = null
         CommandHistory.stopRecording()
     }

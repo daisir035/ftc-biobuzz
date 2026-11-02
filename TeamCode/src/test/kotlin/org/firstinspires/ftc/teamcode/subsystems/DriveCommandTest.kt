@@ -11,12 +11,10 @@ import com.pedropathing.ivy.groups.Groups.sequential
 import com.pedropathing.math.Pose
 import kotlin.math.PI
 import org.firstinspires.ftc.teamcode.core.Robot
-import org.firstinspires.ftc.teamcode.core.monotonicWaitMs
 import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem.TeleopInput
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -118,13 +116,13 @@ class DriveCommandTest {
         h.tick()
 
         val takeover = h.drive.teleopCommand {
-            TeleopInput(0.0, 0.0, 0.0, turnPower = 0.4)
+            TeleopInput(0.0, 0.0, -1.0) // full CCW turn
         }
         Scheduler.schedule(takeover)
         assertFalse(Scheduler.isScheduled(follow))
         h.tick()
         assertEquals("TELEOP", h.drive.driveModeName)
-        assertArrayEquals(doubleArrayOf(-0.4, 0.4, -0.4, 0.4), h.hardware.powers(), 1e-9)
+        assertArrayEquals(doubleArrayOf(-1.0, 1.0, -1.0, 1.0), h.hardware.powers(), 1e-9)
     }
 
     @Test
@@ -142,14 +140,34 @@ class DriveCommandTest {
     }
 
     @Test
+    fun aFailedDriveWriteZeroesTheMotorsForOneTickAndThePathCarriesOn() {
+        val h = Harness()
+        val follow = h.drive.followCommand(h.line())
+        Scheduler.schedule(follow)
+        h.tick()
+        assertTrue(h.hardware.powers().any { it != 0.0 })
+
+        h.hardware.localizer.onRead = { error("I2C glitch") }
+        h.tick()
+        assertEquals(1, h.robot.subsystemFaultCount)
+        assertArrayEquals(DoubleArray(4), h.hardware.powers(), 0.0)
+        assertTrue(Scheduler.isScheduled(follow))
+
+        h.hardware.localizer.onRead = {}
+        h.tick()
+        assertTrue(Scheduler.isScheduled(follow))
+        assertEquals("FOLLOWING", h.drive.driveModeName)
+        assertTrue(h.hardware.powers().any { it != 0.0 })
+    }
+
+    @Test
     fun pathCommandsRefuseToStartWithoutForesightAndTheRobotHaltsWithAReason() {
         val h = Harness(tuned = false)
-        assertThrows(IllegalStateException::class.java) { h.drive.followCommand(h.line()).start() }
-
-        // Scheduling from a binding happens in the input phase, inside the robot's fault boundary.
-        h.robot.loop(input = { Scheduler.schedule(h.drive.holdCommand(h.end)) })
+        val hold = h.drive.holdCommand(h.end)
+        h.robot.loop(input = { Scheduler.schedule(hold) })
         assertEquals(1, h.robot.commandFaultCount)
         assertTrue(h.robot.lastCommandFault!!.message!!.contains("Foresight"))
+        assertFalse(Scheduler.isScheduled(hold))
         assertArrayEquals(DoubleArray(4), h.hardware.powers(), 1e-9)
     }
 
@@ -205,7 +223,9 @@ class DriveCommandTest {
     fun aRaceTimeoutInterruptsTheStepAndTheRoutineContinues() {
         val h = Harness()
         var next = false
-        val routine = sequential(race(h.drive.followCommand(h.line()), monotonicWaitMs(30.0, h.hardware.clock)), instant { next = true })
+        val timeoutNs = h.hardware.clock.nanos() + 30_000_000L
+        val timeout = waitUntil { h.hardware.clock.nanos() >= timeoutNs }
+        val routine = sequential(race(h.drive.followCommand(h.line()), timeout), instant { next = true })
         Scheduler.schedule(routine)
         h.tick()
         assertTrue(h.hardware.powers().any { it != 0.0 })
@@ -270,21 +290,20 @@ class DriveCommandTest {
     }
 
     @Test
-    fun turnTimeoutAbortsTheRoutineInsteadOfRunningItsNextStep() {
+    fun turnTimeoutStopsTurningAndMovesTheRoutineOn() {
         val h = Harness()
         var advanced = false
         val sequence: Command = sequential(h.drive.turnToCommand(PI / 2, timeoutMs = 250.0), instant { advanced = true })
         Scheduler.schedule(sequence)
         h.tick()
-        h.tick(250.0)
-
-        assertEquals(1, h.robot.commandFaultCount)
-        assertNotNull(h.robot.lastCommandFault!!.message!!.let { if ("turnTo timed out" in it) it else null })
         assertFalse(advanced)
+        h.tick(250.0)
+        h.tick()
+
+        assertEquals(0, h.robot.commandFaultCount)
+        assertTrue(advanced)
         assertFalse(Scheduler.isScheduled(sequence))
         assertArrayEquals(DoubleArray(4), h.hardware.powers(), 1e-9)
-        h.tick()
-        assertFalse(advanced)
     }
 
     @Test

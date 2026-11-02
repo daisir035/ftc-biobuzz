@@ -12,7 +12,7 @@ import org.firstinspires.ftc.teamcode.subsystems.ShooterSubsystem
 
 /**
  * Bench test for the dual flywheel (both motors in [RobotConfig.Shooter.MOTORS]):
- * hold **right trigger** to hold [ShooterConfig.targetRpm] under the
+ * hold **R2** to hold [ShooterConfig.targetRpm] under the
  * flywheel's velocity PIDF, **dpad up/down** steps the target by ±100 RPM (also
  * live-editable in Panels), telemetry shows target vs measured RPM and the
  * at-speed flag. Gains are tuned live in Panels
@@ -29,11 +29,10 @@ class DuoShooterTestTeleOp : OpModeBase() {
     override val requiredDevices: List<Preflight.Requirement>
         get() = RobotConfig.Shooter.MOTORS.map { Preflight.Requirement(it, DcMotorEx::class.java) }
     override val publishFieldView: Boolean get() = false
-    override val endgameRumble: Boolean get() = false
 
     override fun configure() {
-        shooter = robot.register(ShooterSubsystem())
-        driver.trigger { driver.rightTrigger > 0.1 }.whileTrue(shooter.spinUp())
+        shooter = robot.register(ShooterSubsystem(batteryVolts = { robot.hubPower.batteryVolts }))
+        driver.trigger { driver.r2 > 0.1 }.whileTrue(shooter.spinUp())
         driver.button(Button.DPAD_UP).onTrue(instant { ShooterConfig.targetRpm += 100.0 })
         driver.button(Button.DPAD_DOWN).onTrue(instant { ShooterConfig.targetRpm -= 100.0 })
     }

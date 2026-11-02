@@ -20,22 +20,27 @@ export function fieldPoint(pose, view, left, top, size) {
   return [left + (pose[0] - view.minX) / view.span * size, top + (1 - (pose[1] - view.minY) / view.span) * size];
 }
 
-// Square view over the field and the run's whole path, in whole field tiles. Poses within
-// `slack` of a wall don't add a tile. Each side grows by at most `maxExtraFields` field
-// lengths so a pose glitch can't shrink the field to a dot.
-export function fieldView(poses, length, maxExtraFields = 1) {
-  const tile = length / 6, cap = 6 * maxExtraFields, slack = tile / 4;
+// Half the side of the robot marker drawn on the field.
+export const ROBOT_HALF_IN = 8;
+
+// Square view over the field and the whole robot at every pose of the run, in whole field tiles.
+// The robot counts by its drawn body at its heading, so a robot half over a wall still shows in
+// full; overhanging by under `toleranceIn` doesn't add a tile. Each side grows by at most
+// `maxExtraFields` field lengths so a pose glitch can't shrink the field to a dot.
+export function fieldView(poses, length, maxExtraFields = 1, toleranceIn = 0.5) {
+  const tile = length / 6, cap = 6 * maxExtraFields;
   let minX = 0, maxX = length, minY = 0, maxY = length;
   for (const [, pose] of poses) {
     if (!Array.isArray(pose) || !finite(pose[0]) || !finite(pose[1])) continue;
-    minX = Math.min(minX, pose[0]); maxX = Math.max(maxX, pose[0]);
-    minY = Math.min(minY, pose[1]); maxY = Math.max(maxY, pose[1]);
+    const reach = finite(pose[2]) ? ROBOT_HALF_IN * (Math.abs(Math.cos(pose[2])) + Math.abs(Math.sin(pose[2]))) : ROBOT_HALF_IN * Math.SQRT2;
+    minX = Math.min(minX, pose[0] - reach); maxX = Math.max(maxX, pose[0] + reach);
+    minY = Math.min(minY, pose[1] - reach); maxY = Math.max(maxY, pose[1] + reach);
   }
-  const tiles = (lo, hi) => [Math.max(-cap, Math.floor((lo + slack) / tile)), Math.min(6 + cap, Math.ceil((hi - slack) / tile))];
+  const tiles = (lo, hi) => [Math.max(-cap, Math.floor((lo + toleranceIn) / tile)), Math.min(6 + cap, Math.ceil((hi - toleranceIn) / tile))];
   const x = tiles(minX, maxX), y = tiles(minY, maxY);
   const count = Math.max(x[1] - x[0], y[1] - y[0]);
   const low = ([lo, hi]) => lo - Math.floor((count - (hi - lo)) / 2);
-  return {minX: low(x) * tile, minY: low(y) * tile, span: count * tile, tile, tiles: count, slack};
+  return {minX: low(x) * tile, minY: low(y) * tile, span: count * tile, tile, tiles: count};
 }
 
 // Ball the robot is tracking, as camera angles in degrees: +tx right, +ty up. BallAssist is what
@@ -139,9 +144,23 @@ export function ballEstimate(pose, sighting, mount, ballDiameterIn = POLLEN_DIAM
 
 export function scalarSeries(series, component = null, scale = 1) {
   return series.map(([t, value]) => {
-    const scalar = component === null ? value : value?.[component];
+    const scalar = component === null ? value
+      : component === 'speed' ? (finite(value?.[0]) && finite(value?.[1]) ? Math.hypot(value[0], value[1]) : null)
+      : value?.[component];
     return [t, typeof scalar === 'boolean' ? Number(scalar) : finite(scalar) ? scalar * scale : null];
   });
+}
+
+// The lowest and highest samples in [start, end], each as [time, value]; ties keep the earliest.
+export function extremes(series, start, end) {
+  let min = null, max = null;
+  for (let i = Math.max(0, indexAt(series, start)); i < series.length && series[i][0] <= end; i++) {
+    const point = series[i];
+    if (point[0] < start || !finite(point[1])) continue;
+    if (!min || point[1] < min[1]) min = point;
+    if (!max || point[1] > max[1]) max = point;
+  }
+  return min && {min, max};
 }
 
 export function plotPoints(series, start, end, buckets = 600) {
@@ -179,24 +198,31 @@ export function plotPoints(series, start, end, buckets = 600) {
 
 export function channelOptions(channels) {
   const axes = ['Left stick X', 'Left stick Y', 'Right stick X', 'Right stick Y', 'Left trigger', 'Right trigger'];
+  const wheels = ['leftFront', 'rightFront', 'leftRear', 'rightRear'];
   const labels = {pose: ['X', 'Y', 'Heading'], velocity: ['X velocity', 'Y velocity', 'Angular velocity'],
-    'gamepad1/axes': axes, 'gamepad2/axes': axes};
+    'gamepad1/axes': axes, 'gamepad2/axes': axes, 'Drive/motors/power': wheels, 'Drive/motors/velocityTps': wheels,
+    'MaxScope/traction/wheels': ['Forward', 'Left', 'Turn'], 'MaxScope/traction/pinpoint': ['Forward', 'Left', 'Turn']};
+  // Speed is derived: the magnitude of the field-frame translational velocity.
+  const derived = {velocity: {speed: 'Speed'}};
   return channels.flatMap(channel => {
     if (!['double', 'int64', 'boolean', 'double[]'].includes(channel.type)) return [];
     const components = channel.type === 'double[]' ? Array.from({length: channel.components}, (_, i) => i) : [null];
+    if (channel.type === 'double[]' && channel.components >= 2) components.push(...Object.keys(derived[channel.name] ?? {}));
     return components.map(component => {
       const name = channel.name;
       let unit = '', scale = 1;
       if (name === 'pose') unit = component === 2 ? 'rad' : 'in';
-      else if (name === 'velocity') unit = component === 2 ? 'rad/s' : 'in/s';
+      else if (name === 'velocity' || name.startsWith('MaxScope/traction/')) unit = component === 2 ? 'rad/s' : 'in/s';
       else if (name.startsWith('loop/') && name.endsWith('Nanos')) { unit = 'ms'; scale = 1e-6; }
-      else if (name === 'battery') unit = 'V';
+      else if (name === 'battery' || name.endsWith('Volts') || name.endsWith('/volts')) unit = 'V';
       else if (name.endsWith('Amps')) unit = 'A';
       else if (/Rad$/.test(name)) unit = 'rad';
       else if (/In$/.test(name)) unit = 'in';
       else if (/Ms$/.test(name)) unit = 'ms';
       else if (/Fps$|Hz$/.test(name)) unit = 'Hz';
-      const componentLabel = component === null ? null : String(labels[name]?.[component] ?? component);
+      else if (/Tps$/.test(name)) unit = 'ticks/s';
+      const componentLabel = component === null ? null
+        : String(derived[name]?.[component] ?? labels[name]?.[component] ?? component);
       const suffix = componentLabel === null ? '' : ` / ${componentLabel}`;
       return {key: `${name}::${component ?? ''}`, name, component, componentLabel, unit, scale, label: name + suffix};
     });
@@ -218,6 +244,14 @@ export function channelTree(options) {
   return root;
 }
 
+// A graph's left and right margins in CSS pixels. Unit scales alternate left, right, left, …;
+// each scale past the first on a side sits further out and widens that margin.
+export const OUTER_AXIS_WIDTH = 42;
+export function plotMargins(axisCount) {
+  return [45 + Math.max(0, Math.ceil(axisCount / 2) - 1) * OUTER_AXIS_WIDTH,
+    45 + Math.max(0, Math.floor(axisCount / 2) - 1) * OUTER_AXIS_WIDTH];
+}
+
 export function plotBounds(layers, axis, end) {
   let min = Infinity, max = -Infinity;
   for (const layer of layers) {
@@ -228,10 +262,43 @@ export function plotBounds(layers, axis, end) {
   }
   if (!finite(min)) { min = 0; max = 1; }
   const padding = (max - min) * 0.12 || Math.max(Math.abs(max) * 0.05, 0.1);
-  return [min - padding, max + padding];
+  // Padding never crosses zero: a loop time or a current that is never negative gets no
+  // negative axis.
+  return [min >= 0 && max > 0 ? Math.max(0, min - padding) : min - padding,
+    max <= 0 && min < 0 ? Math.min(0, max + padding) : max + padding];
 }
 
-export const buttonNames = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'Up', 'Down', 'Left', 'Right', 'Start', 'Back', 'LS', 'RS'];
+// When comparing, where each run is lined up: the op-mode start event, the first time the robot
+// moves more than `thresholdIn` from where it began, or the log's first record. Falls back to 0.
+export function alignmentAnchor(events = [], poses = [], mode, thresholdIn = 1) {
+  if (mode === 'start') return events.find(event => event.text === 'start')?.tSec ?? 0;
+  if (mode !== 'motion') return 0;
+  let origin = null;
+  for (const [time, pose] of poses) {
+    if (!Array.isArray(pose) || !finite(pose[0]) || !finite(pose[1])) continue;
+    if (!origin) origin = pose;
+    else if (Math.hypot(pose[0] - origin[0], pose[1] - origin[1]) > thresholdIn) return time;
+  }
+  return 0;
+}
+
+export const shiftSeries = (series = [], offset) => offset ? series.map(([time, value]) => [time + offset, value]) : series;
+
+// The next problem starting after `time`, or the last one starting before it. Problems are sorted.
+export function adjacentProblem(problems, time, direction) {
+  const epsilon = 1e-6;
+  return (direction > 0 ? problems.find(item => item.startSec > time + epsilon)
+    : problems.findLast(item => item.startSec < time - epsilon)) ?? null;
+}
+
+// Problems under the cursor: spans that cover it, and point problems within `nearSec` of it.
+export function problemsAt(problems, time, nearSec = 0.1) {
+  return problems.filter(item => item.endSec > item.startSec
+    ? item.startSec <= time && time <= item.endSec
+    : Math.abs(item.startSec - time) <= nearSec);
+}
+
+export const buttonNames = ['Cross', 'Circle', 'Square', 'Triangle', 'L1', 'R1', 'Up', 'Down', 'Left', 'Right', 'Options', 'Create', 'L3', 'R3', 'Touchpad'];
 
 export function discreteOptions(channels) {
   const commandSource = ['commands/active', 'commands/running'].find(name => channels.some(channel => channel.name === name));
@@ -279,4 +346,64 @@ export function discreteIntervals(series, end) {
     const stop = Math.min(changes[i + 1]?.[0] ?? end, end);
     return value !== null && start < stop ? [[start, {end: stop, value}]] : [];
   });
+}
+
+// BIOBUZZ milestones on the log clock, from the op-mode start event.
+// Null when the op-mode never started.
+export function matchPhases(match) {
+  const start = match?.startSec;
+  if (!finite(start)) return null;
+  const phases = match.kind === 'auto'
+    ? [['INIT', 0, start], ['AUTO', start, start + match.autoSec], ['AFTER AUTO', start + match.autoSec, Infinity]]
+    : [['INIT', 0, start], ['TELEOP', start, start + match.flowerUnlockSec],
+      ['FLOWER OWNERSHIP UNLOCKED', start + match.flowerUnlockSec, start + match.finalTwentySec],
+      ['FINAL 20 SECONDS', start + match.finalTwentySec, start + match.driverSec],
+      ['AFTER MATCH', start + match.driverSec, Infinity]];
+  const end = start + (match.kind === 'auto' ? match.autoSec : match.driverSec);
+  return {start, end, phases: phases.map(([name, from, to]) => ({name, from, to})),
+    marks: match.kind === 'auto' ? [{tSec: start, label: 'start'}, {tSec: end, label: '0:30'}]
+      : [{tSec: start, label: 'start'}, {tSec: start + match.flowerUnlockSec, label: 'FLOWER ownership unlocked'},
+        {tSec: start + match.finalTwentySec, label: 'Final 20 seconds'}, {tSec: end, label: '2:00'}]};
+}
+
+export const minutes = seconds => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+
+// The phase at `time` and what the driver station clock would read: time left in the period, or
+// time past its end.
+export function phaseAt(match, time) {
+  const phase = match?.phases.find(item => time >= item.from && time < item.to);
+  if (!phase) return null;
+  if (phase.name === 'INIT') return {name: phase.name, clock: ''};
+  if (phase.to === Infinity) return {name: phase.name, clock: `+${minutes(time - match.end)}`};
+  return {name: phase.name, clock: `${minutes(Math.ceil(match.end - time - 1e-9))} left`};
+}
+
+// Each time the robot passed within `radiusIn` of `point`, as {startSec, endSec, atSec}, where
+// atSec is that pass's closest sample.
+export function posePasses(series, point, radiusIn) {
+  const passes = [];
+  let current = null;
+  for (const [time, pose] of series) {
+    const distance = Array.isArray(pose) && finite(pose[0]) && finite(pose[1]) ? Math.hypot(pose[0] - point[0], pose[1] - point[1]) : Infinity;
+    if (distance <= radiusIn) {
+      if (!current) { current = {startSec: time, endSec: time, atSec: time, distance}; passes.push(current); }
+      current.endSec = time;
+      if (distance < current.distance) { current.distance = distance; current.atSec = time; }
+    } else current = null;
+  }
+  return passes.map(({startSec, endSec, atSec}) => ({startSec, endSec, atSec}));
+}
+
+// The pass to jump to from `time`: the first one starting after it, wrapping to the first.
+export function nextPass(passes, time) {
+  return passes.find(pass => pass.startSec > time + 1e-6) ?? passes[0] ?? null;
+}
+
+// The graph window while following playback: `length` seconds with the cursor `lead` of the way
+// across, so more of the past shows than of what is coming, clamped to the run. A length longer
+// than the run, including Infinity for "All", shows the whole run.
+export function followWindow(time, length, end, lead = 2 / 3) {
+  const runEnd = Math.max(end, 0.001), span = Math.min(length, runEnd);
+  const start = Math.max(0, Math.min(runEnd - span, time - span * lead));
+  return [start, start + span];
 }

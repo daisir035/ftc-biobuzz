@@ -4,12 +4,16 @@ import com.bylazar.configurables.annotations.Configurable
 import com.pedropathing.follower.Follower
 import com.pedropathing.math.Pose
 import com.pedropathing.math.Velocity
+import com.pedropathing.utils.Angle
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver
 import com.qualcomm.hardware.gobilda.GoBildaPinpointDriver.DeviceStatus
 import com.qualcomm.robotcore.hardware.HardwareMap
+import kotlin.math.PI
+import kotlin.math.abs
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.SubsystemBase
+import org.firstinspires.ftc.teamcode.core.logging.Events
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 
 /**
@@ -19,36 +23,36 @@ import org.firstinspires.ftc.teamcode.core.logging.StateLog
  * **Fresh start pose every run.** [init] writes [startingPose] (an auto passes
  * its field start pose) to the Pinpoint. The device can still report a sample
  * from before the write, so [ready] stays false until a read confirms the pose
- * (it is written again until then, and gives up as a fault after 5 s). Nothing
- * carries over between op-modes, and the IMU is never recalibrated.
+ * (it is written again during init, and gives up after 5 s). Nothing carries
+ * over between op-modes, and the IMU is never recalibrated.
  *
- * **Watchdog.** [periodic] trips on a non-finite pose, a pose frozen while a
- * path is being followed, or a bad Pinpoint status. A trip latches [fault]
- * and calls [onFault] once: teleop falls back to robot-centric sticks, an auto
- * cancels its routine and stops.
- *
- * **Pose history** for vision latency compensation ([poseAt]) is sampled in
- * [writeHardware], right after the drive's `Follower.update()`, so each sample
- * is stamped when it was measured. That is why this must be registered after
- * the drive ([registerAfter]).
+ * **Watchdog**, two kinds of trip, each latched and reported once:
+ *  - [fault]: the pose can't be driven on (non-finite, frozen while a path is
+ *    followed, unreadable). Calls [onFault] and ends the checks. Teleop falls
+ *    back to robot-centric sticks; an auto cancels its routine and parks.
+ *  - [statusFault]: the Pinpoint reported a problem (bad status, start pose
+ *    never confirmed) but the pose is still live, so the pose checks go on.
+ *    Calls [onStatusFault]. Teleop treats it like [onFault]; autos pass `{}`
+ *    and keep driving.
  */
 class LocalizerSubsystem(
     private val follower: Follower,
     private val clock: Clock = Clock.SYSTEM,
-    private val onEvent: (String) -> Unit = {},
     private val isFollowing: () -> Boolean = { false },
-    private val onFault: () -> Unit = {},
+    /** The pose can't be driven on. */
+    private val onFault: () -> Unit,
+    /** The Pinpoint reported a problem but the pose is still live. */
+    private val onStatusFault: () -> Unit,
     /** Pose written at every init. Autonomous passes its field start pose. */
     val startingPose: Pose = Pose.zero(),
 ) : SubsystemBase("Localizer") {
 
-    private val history = PoseHistory()
-
-    override val registerAfter: Class<out SubsystemBase>
-        get() = MecanumDriveSubsystem::class.java
-
-    /** Latched watchdog fault, or null while healthy. Cleared only by re-init. */
+    /** Latched pose fault, or null while healthy. Cleared only by re-init. */
     var fault: String? = null
+        private set
+
+    /** Latched Pinpoint problem with the pose still live, or null. Cleared only by re-init. */
+    var statusFault: String? = null
         private set
 
     private var rawPinpoint: GoBildaPinpointDriver? = null
@@ -57,13 +61,14 @@ class LocalizerSubsystem(
     private var lastStatus: DeviceStatus? = null
     private var startPoseConfirmed = false
 
-    private var lastStatusNs = Long.MIN_VALUE
+    private var badReadsInARow = 0
     private var frozenTicks = 0
     private var lastPose = Pose.zero()
     private var hasLastPose = false
 
     /** The start pose is confirmed by a read and a real status sample reports READY. */
-    val ready: Boolean get() = fault == null && startPoseConfirmed && (rawPinpoint == null || pinpointReady)
+    val ready: Boolean get() =
+        fault == null && statusFault == null && startPoseConfirmed && (rawPinpoint == null || pinpointReady)
 
     override fun init(hardwareMap: HardwareMap) {
         initStartedNs = clock.nanos()
@@ -76,6 +81,7 @@ class LocalizerSubsystem(
             null
         }
         startPoseConfirmed = false
+        badReadsInARow = 0
         follower.setPose(startingPose)
     }
 
@@ -88,18 +94,18 @@ class LocalizerSubsystem(
             trip("odometry init read failed: ${t.message}")
             return
         }
-        checkPinpointStatus(initializing = true)
-        if (fault == null) confirmStartPose()
-        if (ready) checkPose()
+        if (statusFault == null) checkPinpointStatus(initializing = true)
+        if (statusFault == null) confirmStartPose()
+        if (fault == null && startPoseConfirmed) checkPose()
     }
 
     override fun periodic() {
         if (fault != null) return
         // Started before a read confirmed the start pose (START pressed right after INIT).
-        if (!startPoseConfirmed) confirmStartPose()
-        if (fault != null || !LocalizerConfig.watchdogEnabled) return
-        checkPinpointStatus(initializing = false)
-        if (fault == null) checkPose()
+        if (!startPoseConfirmed && statusFault == null) confirmStartPose()
+        if (fault != null) return
+        if (statusFault == null) checkPinpointStatus(initializing = false)
+        checkPose()
     }
 
     private fun confirmStartPose() {
@@ -111,16 +117,17 @@ class LocalizerSubsystem(
         }
         val offBy = p.distance(startingPose)
         if (offBy <= START_POSE_TOLERANCE_INCHES &&
-            kotlin.math.abs(shortestAngleDelta(p.heading(), startingPose.heading())) <= START_POSE_TOLERANCE_RADIANS
+            abs(shortestAngleDelta(p.heading(), startingPose.heading())) <= START_POSE_TOLERANCE_RADIANS
         ) {
             startPoseConfirmed = true
             return
         }
-        if (clock.nanos() - initStartedNs >= STARTUP_TIMEOUT_NS) {
-            trip("start pose not confirmed: Pinpoint still reports $p")
+        // Once confirmed, a miss is the robot being moved during init, not a stale sample.
+        if (!startPoseConfirmed && clock.nanos() - initStartedNs >= STARTUP_TIMEOUT_NS) {
+            tripStatus("start pose not confirmed: Pinpoint still reports $p")
             return
         }
-        // A sample from before the reset: write the start pose again.
+        // A sample from before the reset, or the robot nudged into place: write the start pose again.
         follower.setPose(startingPose)
     }
 
@@ -149,62 +156,69 @@ class LocalizerSubsystem(
         hasLastPose = true
     }
 
+    /** The driver caches the status from the last bulk read, so this costs no I2C and runs every tick. */
     private fun checkPinpointStatus(initializing: Boolean) {
         val pinpoint = rawPinpoint ?: return
         val now = clock.nanos()
-        if (!initializing && pinpointReady && lastStatusNs != Long.MIN_VALUE &&
-            now - lastStatusNs < STATUS_INTERVAL_NS
-        ) return
-        lastStatusNs = now
         val status = try {
             pinpoint.deviceStatus
         } catch (t: Exception) {
-            trip("Pinpoint status read failed: ${t.message}")
+            tripStatus("Pinpoint status read failed: ${t.message}")
             return
         }
         lastStatus = status
+        // The SDK driver flags one corrupt sample this way and keeps the previous
+        // value; the next read clears it. Only a run of them is a dead sensor.
+        if (status == DeviceStatus.FAULT_BAD_READ) {
+            badReadsInARow++
+            if (badReadsInARow >= BAD_READS_TO_FAULT) tripStatus("Pinpoint status $status for $badReadsInARow reads in a row")
+            return
+        }
+        badReadsInARow = 0
         when {
             status == DeviceStatus.READY -> pinpointReady = true
             initializing && !pinpointReady &&
                 (status == DeviceStatus.NOT_READY || status == DeviceStatus.CALIBRATING) -> {
                 if (now - initStartedNs >= STARTUP_TIMEOUT_NS) {
-                    trip("Pinpoint startup timed out: $status")
+                    tripStatus("Pinpoint startup timed out: $status")
                 }
             }
-            else -> trip("Pinpoint status $status")
+            else -> tripStatus("Pinpoint status $status")
         }
     }
 
     private fun trip(reason: String) {
         fault = reason
-        onEvent("LOCALIZER FAULT: $reason")
+        Events.record("LOCALIZER FAULT: $reason")
+        runPolicy(onFault)
+    }
+
+    private fun tripStatus(reason: String) {
+        statusFault = reason
+        Events.record("LOCALIZER FAULT (pose still live): $reason")
+        runPolicy(onStatusFault)
+    }
+
+    private fun runPolicy(policy: () -> Unit) {
         try {
-            onFault()
+            policy()
         } catch (_: Throwable) {
             // The policy callback is best-effort; the latch + event already
             // carry the diagnosis, and periodic() must keep the loop alive.
         }
     }
 
-    override fun health(): String = fault?.let { "FAULT: $it" } ?: when {
+    override fun health(): String = fault?.let { "FAULT: $it" } ?: statusFault?.let { "FAULT (pose still live): $it" } ?: when {
         ready -> "ok"
         !startPoseConfirmed -> "waiting for start pose ${startingPose} (status ${lastStatus ?: "unread"})"
         else -> "waiting for Pinpoint READY (status ${lastStatus ?: "unread"})"
     }
 
     override fun logState(log: StateLog) {
-        log.put("faulted", fault != null)
+        log.put("faulted", fault != null || statusFault != null)
         log.put("startPoseConfirmed", startPoseConfirmed)
-        fault?.let { log.put("fault", it) }
+        (fault ?: statusFault)?.let { log.put("fault", it) }
     }
-
-    override fun writeHardware() {
-        // Not a hardware write: this is the first point after Follower.update().
-        history.add(clock.nanos(), pose)
-    }
-
-    /** The pose at a past [Clock] time, interpolated; null outside the last 512 samples (a few seconds). */
-    fun poseAt(timestampNanos: Long): Pose? = history.lookup(timestampNanos)
 
     /** Field pose: inches, radians. */
     val pose: Pose get() = follower.pose()
@@ -218,8 +232,10 @@ class LocalizerSubsystem(
     }
 
     private companion object {
-        const val STATUS_INTERVAL_NS = 1_000_000_000L
         const val STARTUP_TIMEOUT_NS = 5_000_000_000L
+
+        /** Consecutive FAULT_BAD_READ samples (one per tick) before the Pinpoint is called dead. */
+        const val BAD_READS_TO_FAULT = 5
 
         /** How far (inches) a read may be from the start pose and still confirm it. */
         const val START_POSE_TOLERANCE_INCHES = 0.5
@@ -232,12 +248,20 @@ class LocalizerSubsystem(
 /** Localizer tuning, live-editable in Panels; copy values you want to keep into this file. */
 @Configurable
 object LocalizerConfig {
-    /** Off switch in case the watchdog ever false-trips. */
-    @JvmField var watchdogEnabled = true
-
     /**
      * Ticks of a bit-identical pose while following before the watchdog calls
      * the localizer dead. A live Pinpoint jitters every read. 25 ≈ 0.5 s at 50 Hz.
      */
     @JvmField var frozenPoseTicks = 25
 }
+
+/**
+ * Shortest signed rotation taking [from] to [to], in (-π, π]. An exact
+ * half-turn resolves to +π so a correction never flips direction on noise.
+ */
+internal fun shortestAngleDelta(from: Double, to: Double): Double {
+    val delta = Angle.normalizeSigned(to - from)
+    return if (abs(delta + PI) < 1e-12) PI else delta
+}
+
+internal fun Pose.isFinite(): Boolean = x().isFinite() && y().isFinite() && heading().isFinite()

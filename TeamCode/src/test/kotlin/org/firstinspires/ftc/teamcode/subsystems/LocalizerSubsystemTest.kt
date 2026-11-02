@@ -1,34 +1,27 @@
 package org.firstinspires.ftc.teamcode.subsystems
 
 import com.pedropathing.math.Pose
-import kotlin.math.PI
-import org.firstinspires.ftc.teamcode.core.sim.FakeClock
+import org.firstinspires.ftc.teamcode.core.logging.Events
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 class LocalizerSubsystemTest {
 
-    private val clock = FakeClock(start = 0L)
-    private val follower = PedroDriveFixture(tuned = false).follower
     private val events = mutableListOf<String>()
-    private val localizer = LocalizerSubsystem(follower, clock, onEvent = events::add)
+
+    @Before
+    fun captureEvents() {
+        Events.sink = events::add
+    }
 
     @After
     fun restoreConfig() {
-        LocalizerConfig.watchdogEnabled = true
+        Events.reset()
         LocalizerConfig.frozenPoseTicks = 25
-    }
-
-    @Test
-    fun poseAtInterpolatesTheSampledHistory() {
-        sample(0L, Pose(0.0, 0.0, 0.0))
-        sample(100_000_000L, Pose(10.0, 0.0, PI / 2.0))
-
-        assertPose2d(Pose(5.0, 0.0, PI / 4.0), localizer.poseAt(50_000_000L)!!)
-        assertNull(localizer.poseAt(200_000_000L))
     }
 
     // ---------------------------------------------------------------- watchdog
@@ -39,11 +32,12 @@ class LocalizerSubsystemTest {
         val follower = PedroDriveFixture(tuned = false).follower
         var faults = 0
         val events = mutableListOf<String>()
+        init { Events.sink = events::add }
         val localizer = LocalizerSubsystem(
             follower,
-            onEvent = events::add,
             isFollowing = { following },
             onFault = { faults++ },
+            onStatusFault = { faults++ },
         ).also(::initialized)
 
         fun setPose(x: Double, y: Double, heading: Double) {
@@ -110,48 +104,19 @@ class LocalizerSubsystemTest {
     }
 
     @Test
-    fun watchdogCanBeDisabled() {
-        LocalizerConfig.watchdogEnabled = false
-        val h = WatchdogHarness()
-        h.setPose(Double.NaN, 0.0, 0.0)
-
-        h.localizer.periodic()
-
-        assertNull(h.localizer.fault)
-        assertEquals(0, h.faults)
-    }
-
-    @Test
     fun watchdogSurvivesThrowingFaultPolicy() {
         val h = WatchdogHarness()
         val localizer = LocalizerSubsystem(
             h.follower,
-            onEvent = h.events::add,
             isFollowing = { true },
             onFault = { error("policy blew up") },
+            onStatusFault = { error("policy blew up") },
         ).also(::initialized)
         h.setPose(Double.NaN, 0.0, 0.0)
 
         localizer.periodic() // must not throw
 
         assertTrue(localizer.fault!!.contains("non-finite"))
-    }
-
-    /** Pose history is sampled in writeHardware, right after Follower.update(). */
-    private fun sample(timestampNanos: Long, pose: Pose) {
-        clock.now = timestampNanos
-        follower.setPose(pose)
-        localizer.writeHardware()
-    }
-
-    private fun assertPose2d(expected: Pose, actual: Pose) {
-        assertEquals(expected.x(), actual.x(), EPS)
-        assertEquals(expected.y(), actual.y(), EPS)
-        assertEquals(expected.heading(), actual.heading(), EPS)
-    }
-
-    private companion object {
-        const val EPS = 1e-6
     }
 }
 

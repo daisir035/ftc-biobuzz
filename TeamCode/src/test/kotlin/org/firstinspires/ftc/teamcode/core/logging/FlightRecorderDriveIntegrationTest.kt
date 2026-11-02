@@ -35,7 +35,7 @@ import org.junit.Test
  * AdvantageScope layouts and `tools/logs/analyze_wpilog.py` rely on.
  *
  * Set `WPILOG_SAMPLE_DIR` to keep that session's log for AdvantageScope and
- * the analyzer (see dutchdocs/OPERATIONS.md, "Flight recorder validation").
+ * the analyzer (see dutchdocs/LOGGING.md, "Flight recorder validation").
  */
 class FlightRecorderDriveIntegrationTest {
 
@@ -63,7 +63,7 @@ class FlightRecorderDriveIntegrationTest {
         val robot = Robot(hardware.hardwareMap, hardware.clock)
         val drive: MecanumDriveSubsystem = robot.register(hardware.drive)
         val localizer = robot.register(
-            LocalizerSubsystem(hardware.follower, hardware.clock, onEvent = robot::recordEvent, isFollowing = drive::isFollowing),
+            LocalizerSubsystem(hardware.follower, hardware.clock, isFollowing = drive::isFollowing, onFault = {}, onStatusFault = {}),
         )
         val gamepad = Gamepad()
         val driver = GamepadEx(gamepad)
@@ -102,12 +102,66 @@ class FlightRecorderDriveIntegrationTest {
     }
 
     @Test
+    fun toolReadDriveAndLocalizerChannelsKeepTheirExactNames() {
+        val s = Session(logDir)
+        try {
+            // Cross every 200 ms current-sampling boundary to cover all four wheels.
+            repeat(4) {
+                s.hardware.clock.advanceMs(200.0)
+                s.tick()
+            }
+            s.tick {
+                Scheduler.schedule(s.drive.followCommand(Paths.line(Pose.zero(), Pose(24.0, 0.0)).constant(0.0)))
+            }
+        } finally {
+            s.robot.stop()
+        }
+
+        val log = readSingleLog()
+        val channels = listOf(
+            "Drive/motors/power", "Drive/motors/velocityTps",
+            "Drive/motors/leftFront/currentAmps", "Drive/motors/rightFront/currentAmps",
+            "Drive/motors/leftRear/currentAmps", "Drive/motors/rightRear/currentAmps",
+            "Drive/odometryFallback", "Localizer/faulted",
+            "pose", "velocity", "driveMode", "battery",
+            "follow/translationalErrorIn", "follow/headingErrorRad",
+            "gamepad1/axes", "gamepad1/buttons",
+            "loop/totalNanos", "loop/windowMaxTotalNanos",
+            "commands/events", "commands/active", "commands/lost", "events",
+        )
+        for (channel in channels) {
+            assertTrue("Missing tool-read channel: $channel", log.has(channel))
+            assertTrue("Empty tool-read channel: $channel", log.records(channel).isNotEmpty())
+        }
+        assertEquals(0, s.robot.recorderFaultCount)
+        assertEquals(0, s.robot.subsystemFaultCount)
+        assertEquals(0, s.robot.commandFaultCount)
+    }
+
+    @Test
+    fun globalEventsFollowTheRecorderLifetime() {
+        val stale = mutableListOf<String>()
+        Events.sink = stale::add
+        val s = Session(logDir)
+        Events.record("global marker")
+        assertTrue(stale.isEmpty())
+        s.robot.closeFlightRecorder()
+        assertEquals(null, Events.sink)
+        Events.record("after close")
+        s.robot.stop()
+
+        val events = readSingleLog().strings("events").map { it.second }
+        assertTrue("global marker" in events)
+        assertFalse("after close" in events)
+    }
+
+    @Test
     fun teleopPathTakeoverAndFaultProduceADecodableFieldLog() {
         val s = Session(logDir)
         s.hardware.localizer.measuredPose = Pose(8.0, 56.0, 0.0)
         s.hardware.localizer.measuredVelocity = Velocity(10.0, -2.0, 0.5)
         s.gamepad.left_stick_y = -1f
-        s.gamepad.a = true
+        s.gamepad.cross = true
         s.gamepad.dpad_left = true
         repeat(3) { s.tick() }
 
@@ -191,7 +245,7 @@ class FlightRecorderDriveIntegrationTest {
         assertEquals(1.0, followErrors.last().second, 1e-6)
         assertTrue(log.has("follow/headingErrorRad"))
 
-        // Gamepad encoding: axes [lx, ly(+up), rx, ry(+up), lt, rt]; buttons bitmask A=bit0, dpadLeft=bit8.
+        // Gamepad encoding: axes [lx, ly(+up), rx, ry(+up), L2, R2]; buttons bitmask cross=bit0, dpadLeft=bit8.
         assertArrayEquals(doubleArrayOf(0.0, 1.0, 0.0, 0.0, 0.0, 0.0), log.doubleArrays("gamepad1/axes").first().second, 1e-9)
         assertEquals((1L shl 0) or (1L shl 8), log.longs("gamepad1/buttons").first().second)
         assertTrue(log.doubleArrays("gamepad2/axes").isEmpty())
@@ -201,14 +255,16 @@ class FlightRecorderDriveIntegrationTest {
         assertTrue(log.longs("loop/windowMaxTotalNanos").isNotEmpty())
         assertEquals(true, log.booleans("Drive/fieldCentric").first().second)
         assertEquals(false, log.booleans("Localizer/faulted").first().second)
-        assertTrue(listOf("leftFront", "leftRear", "rightFront", "rightRear").any { log.doubles("Drive/motors/$it/power").isNotEmpty() })
+        assertEquals(pose.size, log.doubleArrays("Drive/motors/power").size)
+        assertEquals(pose.size, log.doubleArrays("Drive/motors/velocityTps").size)
+        assertTrue(listOf("leftFront", "leftRear", "rightFront", "rightRear").any { log.doubles("Drive/motors/$it/currentAmps").isNotEmpty() })
 
         // Same-tick events get distinct timestamps, so AdvantageScope shows every one.
         val eventTimes = log.strings("events").map { it.first }
         assertTrue(eventTimes.zipWithNext().all { (a, b) -> b > a })
         val events = log.strings("events").map { it.second }
         assertTrue("init IntegrationTest" in events)
-        assertTrue("COMMAND FAULT: IllegalStateException: boom (commands cleared, subsystems halted)" in events)
+        assertTrue("COMMAND FAULT: Faulty step: IllegalStateException: boom (command ended)" in events)
         assertTrue("marker" in events)
         assertEquals("stop", events.last())
         assertFalse(log.has("commands/running"))

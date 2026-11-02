@@ -4,14 +4,15 @@ import com.pedropathing.api.Paths.line
 import com.pedropathing.ivy.Command
 import com.pedropathing.ivy.Scheduler
 import com.pedropathing.ivy.commands.Commands.instant
+import com.pedropathing.ivy.commands.Commands.waitMs
 import com.pedropathing.ivy.groups.Groups.race
 import com.pedropathing.ivy.groups.Groups.sequential
 import com.pedropathing.paths.Path
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous
 import org.firstinspires.ftc.teamcode.core.Alliance
+import org.firstinspires.ftc.teamcode.core.GamepadEx.Button
 import org.firstinspires.ftc.teamcode.core.OpModeBase
 import org.firstinspires.ftc.teamcode.core.logging.logged
-import org.firstinspires.ftc.teamcode.core.monotonicWaitMs
 import org.firstinspires.ftc.teamcode.pedro.Constants
 import org.firstinspires.ftc.teamcode.subsystems.LocalizerSubsystem
 import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem
@@ -23,9 +24,10 @@ import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem
  *
  * Lifecycle follows the Example Auto skeleton: start pose is written to the
  * Pinpoint at INIT (place the robot first), start delay is picked on dpad
- * left/right during init, start is refused without Foresight tuning or a
- * ready localizer, and the op-mode stops when the routine is no longer
- * scheduled.
+ * left/right during init, start is refused without Foresight tuning, the
+ * localizer gets up to [LOCALIZER_WAIT_MS] to become ready (then the routine
+ * runs anyway; only a lost pose cancels it), and the op-mode stops when the
+ * routine is no longer scheduled.
  */
 @Autonomous(name = "Default Auto RED", group = "Match")
 open class DefaultAutoRed : OpModeBase() {
@@ -35,6 +37,8 @@ open class DefaultAutoRed : OpModeBase() {
     // Picked on dpad left/right during init, agreed with the alliance partner before the match.
     private var startDelaySec = 0
     private var routine: Command? = null
+    private var waitingToStart = false
+    private var startedNs = 0L
 
     /** The BLUE copy of this file overrides this and changes nothing else. */
     override val initialAlliance: Alliance get() = Alliance.RED
@@ -45,17 +49,17 @@ open class DefaultAutoRed : OpModeBase() {
     private val path1End get() = poses.of(70.7572, 21.5438, 180.0)
 
     override fun configure() {
-        val follower = Constants.create(hardwareMap)
-        // Drive first, localizer second: pose history is sampled after Follower.update().
+        val follower = Constants.create(hardwareMap) { robot.hubPower.batteryVolts }
         drive = robot.register(MecanumDriveSubsystem(follower))
         localizer = robot.register(
             LocalizerSubsystem(
                 follower,
-                onEvent = robot::recordEvent,
                 isFollowing = drive::isFollowing,
                 // Driving blind is worse than parking: cancel the routine (its
                 // drive command stops the follower) and stay put.
                 onFault = { routine?.let(Scheduler::cancel) },
+                // The pose is still live: keep driving, the event is in the log.
+                onStatusFault = {},
                 // Written to the Pinpoint at INIT, after the reset. Place the robot before INIT.
                 startingPose = start,
             ),
@@ -71,20 +75,20 @@ open class DefaultAutoRed : OpModeBase() {
         "Default Auto routine",
         race(
             sequential(
-                logged("Start delay", monotonicWaitMs(startDelaySec * 1000.0)),
+                logged("Start delay", waitMs(startDelaySec * 1000.0)),
                 race(
                     drive.followCommand(path1(), holdEnd = true, name = "Drive path 1"),
-                    logged("Path 1 time limit", monotonicWaitMs(8_000.0)),
+                    logged("Path 1 time limit", waitMs(8_000.0)),
                 ),
                 instant { robot.recordEvent("AUTO: complete") },
             ),
-            logged("Routine time limit", monotonicWaitMs(29_000.0)),
+            logged("Routine time limit", waitMs(29_000.0)),
         ),
     )
 
     override fun onInitLoop() {
-        if (driver.dpadRightPressed) startDelaySec = (startDelaySec + 1).coerceAtMost(10)
-        if (driver.dpadLeftPressed) startDelaySec = (startDelaySec - 1).coerceAtLeast(0)
+        if (driver.pressed(Button.DPAD_RIGHT)) startDelaySec = (startDelaySec + 1).coerceAtMost(10)
+        if (driver.pressed(Button.DPAD_LEFT)) startDelaySec = (startDelaySec - 1).coerceAtLeast(0)
         telemetryBag.section("Auto") { put("start delay s", startDelaySec) }
     }
 
@@ -93,10 +97,21 @@ open class DefaultAutoRed : OpModeBase() {
             abortAuto("Foresight is not tuned")
             return
         }
-        if (!localizer.ready) {
-            abortAuto("localizer not ready before start: ${localizer.health()}")
+        startedNs = robot.clock.nanos()
+        waitingToStart = true
+    }
+
+    /** START pressed right after INIT: give the localizer up to [LOCALIZER_WAIT_MS], then go anyway unless the pose is lost. */
+    private fun startRoutineWhenReady() {
+        localizer.fault?.let {
+            waitingToStart = false
+            abortAuto("pose lost before start: $it")
             return
         }
+        val waitedMs = (robot.clock.nanos() - startedNs) / 1e6
+        if (!localizer.ready && waitedMs < LOCALIZER_WAIT_MS) return
+        if (!localizer.ready) robot.recordEvent("AUTO: starting without a ready localizer: ${localizer.health()}")
+        waitingToStart = false
         val selected = buildRoutine()
         routine = selected
         Scheduler.schedule(selected)
@@ -104,6 +119,7 @@ open class DefaultAutoRed : OpModeBase() {
     }
 
     override fun onLoop() {
+        if (waitingToStart) startRoutineWhenReady()
         val scheduled = routine?.let(Scheduler::isScheduled) ?: false
         telemetryBag.section("Auto") {
             put("alliance", alliance.name)
@@ -121,6 +137,10 @@ open class DefaultAutoRed : OpModeBase() {
     private fun abortAuto(reason: String) {
         robot.recordEvent("AUTO ABORTED: $reason")
         requestOpModeStop()
+    }
+
+    private companion object {
+        const val LOCALIZER_WAIT_MS = 1_000.0
     }
 }
 

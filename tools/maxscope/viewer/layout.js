@@ -38,14 +38,14 @@ export function createLayout({seek, preparePlots, redraw}) {
     if (state.run) seek(state.time);
   }
 
-  const viewNames = {field: 'Field', signals: 'Signals', commands: 'Commands', events: 'Events', gamepads: 'Gamepads', camera: 'Camera'};
+  const viewNames = {field: 'Field', signals: 'Signals', commands: 'Commands', events: 'Events', gamepads: 'Gamepads', problems: 'Problems', camera: 'Camera'};
   const views = new Map();
   const layoutKey = 'maxscope.layout.v2';
 
   function saveLayout() {
     state.layout = {panels: state.panels, layers: state.charts.length ? state.charts.map(chart => [...chart.keys]) : state.layout?.layers,
       discrete: state.charts.length ? state.charts.map(chart => [...chart.discreteKeys]) : state.layout?.discrete,
-      fieldCommands: $('field-commands-toggle').checked, fieldBall: $('field-ball-toggle').checked,
+      fieldCommands: $('field-commands-toggle').checked, fieldBall: $('field-ball-toggle').checked, fieldElements: $('field-elements-toggle').checked,
       cameraViews: Object.fromEntries(state.cameraViews.map(view => [view.key, view.source]))};
     try { localStorage.setItem(layoutKey, JSON.stringify(state.layout)); } catch { /* Storage may be disabled. */ }
   }
@@ -227,7 +227,8 @@ export function createLayout({seek, preparePlots, redraw}) {
 
   function initializeLayout() {
     const elements = {field: document.querySelector('.field-card'), signals: document.querySelector('.signals-card'),
-      commands: $('commands').closest('.card'), events: $('events').closest('.card'), gamepads: document.querySelector('.inputs-card')};
+      commands: $('commands').closest('.card'), events: $('events').closest('.card'), gamepads: document.querySelector('.inputs-card'),
+      problems: document.querySelector('.problems-card')};
     for (const [key, view] of Object.entries(elements)) {
       view.dataset.panel = key; views.set(key, view);
       addDragHandle(key, view);
@@ -238,6 +239,7 @@ export function createLayout({seek, preparePlots, redraw}) {
       const saved = JSON.parse(localStorage.getItem(layoutKey));
       $('field-commands-toggle').checked = saved?.fieldCommands !== false;
       $('field-ball-toggle').checked = saved?.fieldBall !== false;
+      $('field-elements-toggle').checked = saved?.fieldElements !== false;
       const previous = saved || JSON.parse(localStorage.getItem('maxscope.layout.v1'));
       if (saved?.panels) {
         for (const keys of Object.values(saved.panels)) {
@@ -248,6 +250,8 @@ export function createLayout({seek, preparePlots, redraw}) {
         for (const tab of Object.keys(state.panels)) {
           if (Array.isArray(saved.panels[tab])) state.panels[tab] = restoredColumns(saved.panels[tab], TAB_COLUMNS[tab]);
         }
+        // Problem detection is off on every load, so its view is too.
+        for (const tab of Object.keys(state.panels)) state.panels[tab] = state.panels[tab].map(keys => keys.filter(key => key !== 'problems'));
       }
       if (Array.isArray(previous?.layers) && previous.layers.length > 0) {
         state.layout = {discrete: Array.isArray(previous.discrete) ? previous.discrete.slice(0, 8).map(keys => Array.isArray(keys) ? [...new Set(keys.filter(key => typeof key === 'string'))].slice(0, 8) : []) : undefined, layers: previous.layers.slice(0, 8).map(keys => Array.isArray(keys) ? [...new Set(keys.filter(key => typeof key === 'string'))].slice(0, 8) : [])};
@@ -270,7 +274,17 @@ export function createLayout({seek, preparePlots, redraw}) {
     return columns;
   }
 
+  // The Problems view comes and goes with problem detection: into the tab in view when it is
+  // turned on, out of every tab when it is turned off.
+  function setProblemsView(shown) {
+    if (shown && !shownKeys().includes('problems')) { addView('problems'); return; }
+    if (!shown) {
+      for (const tab of Object.keys(state.panels)) state.panels[tab] = state.panels[tab].map(keys => keys.filter(key => key !== 'problems'));
+      saveLayout(); selectTab(state.activeTab);
+    }
+  }
+
   $('add-view').onchange = event => { addView(event.target.value); event.target.value = ''; };
 
-  return {initializeLayout, saveLayout};
+  return {initializeLayout, saveLayout, setProblemsView};
 }

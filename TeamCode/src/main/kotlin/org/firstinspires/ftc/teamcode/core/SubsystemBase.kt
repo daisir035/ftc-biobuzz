@@ -4,6 +4,7 @@ import com.pedropathing.ivy.Command
 import com.pedropathing.ivy.CommandBuilder
 import com.pedropathing.ivy.behaviors.ConflictBehavior
 import com.qualcomm.robotcore.hardware.HardwareMap
+import org.firstinspires.ftc.teamcode.core.logging.AutomaticStateLog
 import org.firstinspires.ftc.teamcode.core.logging.LoggedCommand
 import org.firstinspires.ftc.teamcode.core.logging.StateLog
 
@@ -42,14 +43,6 @@ abstract class SubsystemBase(val name: String) {
         }
     }
 
-    /**
-     * Subsystem type that must already be registered before this one.
-     * [Robot.register] enforces it, turning a silent ordering bug (e.g. a
-     * localizer sampling pose history before the drive has updated the
-     * follower) into an init-time error.
-     */
-    open val registerAfter: Class<out SubsystemBase>? get() = null
-
     /** Called once when the op-mode initialises. Resolve hardware here; failures should throw. */
     open fun init(hardwareMap: HardwareMap) {}
 
@@ -68,15 +61,26 @@ abstract class SubsystemBase(val name: String) {
     /**
      * Write this subsystem's flight-log channels. Called at most 100 times a
      * second by the flight recorder; channel names are prefixed with `<name>/`.
+     * Public scalar getters declared on this class are automatic; override for
+     * arrays or specific channel names. Inherited, internal and publicly writable state is skipped.
      */
-    open fun logState(log: StateLog) {}
+    open fun logState(log: StateLog) = AutomaticStateLog.record(this, log)
 
     /**
-     * A command threw. [Robot] has already cleared Ivy's scheduler (no end
-     * handlers run) and calls this on every subsystem: put actuators in a safe
-     * state. Default commands resume on the next tick. Never throw.
+     * Something threw: a command using this subsystem, or an unlogged command
+     * (then [Robot] has cleared Ivy's scheduler and calls this on every
+     * subsystem). Put actuators in a safe state. Default commands resume on
+     * the next tick. Never throw.
      */
     open fun onCommandFault() {}
+
+    /**
+     * This subsystem's writeHardware() threw, so its outputs may be stuck at
+     * their last values. Zero them now, but leave the running command alone
+     * so a one-tick glitch costs one tick. Defaults to [onCommandFault].
+     * Never throw.
+     */
+    open fun onWriteFault() = onCommandFault()
 
     /**
      * Called once at the end of the op-mode, before diagnostics and storage.
