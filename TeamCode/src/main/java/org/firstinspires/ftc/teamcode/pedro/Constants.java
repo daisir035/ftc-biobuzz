@@ -38,9 +38,10 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveConfig;
  *       xPodOffset/yPodOffset: both versions pass them to
  *       {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
  *   <li>Foresight: AutoTune's Foresight procedure output, pasted verbatim into
- *       {@link #foresightConfig}; {@link #FORESIGHT_TUNED} is true. These values
- *       predate voltage compensation: re-run through compensation at 12.0 V after
- *       the 2026-10-25 sync, and after any drivetrain or weight change.</li>
+ *       {@link #foresightConfig} on 2026-11-01 (9d1be40), when AutoTune already drove
+ *       through {@link VoltageCompensatedMecanum} at {@link #NOMINAL_VOLTS} 12.0.
+ *       {@link #FORESIGHT_TUNED} is true. Re-run after any drivetrain, weight or
+ *       NOMINAL_VOLTS change.</li>
  * </ul>
  *
  * <p>Pedro 3 has no voltage compensation for mecanum; {@link VoltageCompensatedMecanum}

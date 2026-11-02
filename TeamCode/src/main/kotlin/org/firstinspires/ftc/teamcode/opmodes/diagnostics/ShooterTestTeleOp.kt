@@ -32,7 +32,7 @@ class ShooterTestTeleOp : OpModeBase() {
 
     override fun configure() {
         shooter = robot.register(
-            ShooterSubsystem(listOf(RobotConfig.Shooter.SINGLE_MOTOR), feedbackMotor = RobotConfig.Shooter.SINGLE_MOTOR) {
+            ShooterSubsystem(listOf(RobotConfig.Shooter.SINGLE_MOTOR), feedbackMotor = RobotConfig.Shooter.SINGLE_MOTOR, clock = robot.clock) {
                 robot.hubPower.batteryVolts
             },
         )

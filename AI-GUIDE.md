@@ -201,23 +201,26 @@ Verified 3.0.1 behaviour to respect:
 
 Configuration lives in `pedro/Constants.java` in AutoTune's layout
 (`drivetrainConfig`, `localizerConfig`, `foresightConfig`, `create()`).
-Drivetrain motor names are literal strings in `drivetrainConfig`, matching
-AutoTune's output. Preflight and motor logging read that config; do not add
-a second set of drivetrain name constants in `RobotConfig`.
+Hardware names are not literals there: `drivetrainConfig` and
+`localizerConfig` read `RobotConfig.Drive` / `RobotConfig.Localization`, as
+does `Preflight.standard`. When pasting AutoTune output, keep the name lines
+pointing at `RobotConfig`.
 Pedro 3 has no voltage compensation for mecanum, so the drivetrain is
 `pedro/VoltageCompensatedMecanum.java`: every follower power (paths, holds,
 turns; not manual driving) is scaled by `Constants.NOMINAL_VOLTS` / the smoothed Control Hub voltage, and
 the scale is logged as `Drive/voltageScale`. AutoTune's Foresight and Tests
 procedures use it too, so `NOMINAL_VOLTS` is part of the tuning: change it
 only together with a re-tune.
-`foresightConfig` holds this robot's AutoTune output (`FORESIGHT_TUNED` true);
-re-tune after drivetrain, weight, or nominal-voltage changes. With
+`foresightConfig` holds this robot's AutoTune output (`FORESIGHT_TUNED` true),
+tuned 2026-11-01 through the compensation at `NOMINAL_VOLTS` 12.0; re-tune
+after drivetrain, weight, or nominal-voltage changes. With
 `FORESIGHT_TUNED` false the follower has no algorithm, manual driving works,
 and path, hold and turn commands throw at start. AutoTune procedures in
 `pedro/procedures/` are
-copied unmodified from Pedro-Pathing/Quickstart b4312385, except `PinpointTuner.java`,
-copied byte-for-byte from `daisir035/Quickstart` (direction fix `3494d7a`). That fix
-caches direction readings before Stop instead of consulting a reset pose afterward.
+copied unmodified from Pedro-Pathing/Quickstart: `PinpointTuner.java` from its
+`HEAD` (the team's read-before-Stop direction fix, merged as PR #115), the
+others from b4312385. That fix caches direction readings before Stop instead
+of consulting a reset pose afterward.
 Use official/team-fork procedures as supplied; do not invent local calibration workflows.
 `pedro/Tuning.java`
 registers the Mecanum, Pinpoint, Foresight and Tests procedures.
@@ -351,7 +354,7 @@ implements the fault policy in lifecycle rule 5.
 - **Mirroring:** `Alliance.poses()` / `Alliance.mirror`, field length
   `RobotConfig.Field.LENGTH_INCHES` (**141.5**), symmetry
   `RobotConfig.Field.SYMMETRY`. Not `PoseFactory.mirrorX`, which only reflects.
-- **Foresight constants are not tuned.** Never invent values; run AutoTune.
+- **Foresight constants come only from AutoTune.** Never invent values; run AutoTune.
   The Pedro docs' example ForesightConfig numbers are another robot's.
 - **Only `Field/Robot` is rotated.** Pedro's frame (origin at the corner on
   the audience's left, +X along the audience wall) and the FTC frame

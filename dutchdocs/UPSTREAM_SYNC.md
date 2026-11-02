@@ -2,6 +2,15 @@
 
 ## 2026-10-25: selective sync from `maxthegray/ftc-biobuzz`
 
+> **Superseded in part by the 2026-11-01 sections below.** Kept as the record
+> of that day, but these details no longer describe the code:
+> `2b0f404` (simplified vision) is now taken, so the ball camera, HIVE
+> tracker, `PoseHistory` and `registerAfter` are gone and follow-up 3 does not
+> apply; the Pinpoint offsets are now the 2026-11-01 tuner values; the
+> Foresight coefficients were re-tuned 2026-11-01 through compensation at
+> 12.0 V (follow-up 1); the shooter motors are `up` / `down`, not `L` / `R`.
+> `pedro/Constants.java` and `RobotConfig.kt` are the current values.
+
 ### Revisions and method
 
 - Local branch before sync: `master` at `dc9ea99` (`完成了底盘的表征`).
@@ -110,7 +119,7 @@ Host tests cannot validate these changes physically. Before competition use:
   (above); this merge only records that, so the next sync starts from
   `89622ee` instead of re-presenting the same 60+ commits as conflicts.
 - Every conflict and every cleanly merged upstream change resolved to this
-  branch: the exclusions above still hold (full vision, `PoseHistory`,
+  branch: the exclusions above held at the time (full vision, `PoseHistory`,
   `monotonicWaitMs`, `registerAfter`, `toggleOnTrue`, this robot's Pinpoint
   and Foresight values). The `sync-upstream` fixes are superseded here by
   `Scoring`, the Shooter NaN guard and the Feeder `spinning` gate.
@@ -146,3 +155,10 @@ Re-checked independently instead of trusting the record above:
   with it. The full estimator is at upstream tag `vision-full`.
 - Drive motor names are back in `RobotConfig.Drive` (left front, right front,
   left rear, right rear) and `Constants` points at them, as upstream does.
+- Pinpoint `resetMode`: **diverges from upstream.** Upstream sets
+  `ResetMode.NONE` (40aa083, "Start localization fresh at every op-mode
+  init"): INIT only writes the pose, because a recalibration needs a
+  stationary robot for ~0.25 s and is not needed to zero the pose. This
+  branch (faf824e) uses Pedro's default `RECALIBRATE_IMU`, as AutoTune prints
+  the config: the gyro is recalibrated every INIT, so the robot must be still
+  at INIT. Keep this choice on the next sync unless decided otherwise.

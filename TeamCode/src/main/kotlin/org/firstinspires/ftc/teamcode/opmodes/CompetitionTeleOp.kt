@@ -28,7 +28,7 @@ import org.firstinspires.ftc.teamcode.subsystems.ShovelSubsystem
  *  - **R2** (hold) — spin up the flywheel and shoot once at speed;
  *    release stops the flywheel, intake and feeder
  *  - **L2** (hold) — precision driving
- *  - **Square** — switch shovels between the 0° and 125° working presets
+ *  - **Square** — switch shovels between [ShovelConfig.preset1OffsetDegrees] and [ShovelConfig.preset2OffsetDegrees]
  *
  * Shooting and ejecting take the intake and feeder; R1 still held when they
  * are released collects again. Every intake/feeder/flywheel combination is
@@ -65,7 +65,7 @@ class CompetitionTeleOp : TeleOpBase() {
     override fun configureTeleop() {
         intake = robot.register(IntakeSubsystem())
         feeder = robot.register(FeederSubsystem())
-        shooter = robot.register(ShooterSubsystem { robot.hubPower.batteryVolts })
+        shooter = robot.register(ShooterSubsystem(clock = robot.clock) { robot.hubPower.batteryVolts })
         shovel = robot.register(ShovelSubsystem())
         shovel.defaultCommand = shovel.holdOffsetDegrees {
             if (shovelExtended) ShovelConfig.preset2OffsetDegrees else ShovelConfig.preset1OffsetDegrees
