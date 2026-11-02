@@ -59,7 +59,7 @@ class AutomaticStateLogTest {
             transfer.values,
         )
         val turret = Capture().also { TurretSubsystem().logState(it) }
-        val shooter = Capture().also { ShooterSubsystem().logState(it) }
+        val shooter = Capture().also { ShooterSubsystem { Double.NaN }.logState(it) }
         assertEquals(mapOf("configured" to false), turret.values)
         assertEquals(
             mapOf(

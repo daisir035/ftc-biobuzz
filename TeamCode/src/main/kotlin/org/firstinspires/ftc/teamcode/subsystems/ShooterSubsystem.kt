@@ -7,7 +7,6 @@ import com.qualcomm.robotcore.hardware.DcMotor
 import com.qualcomm.robotcore.hardware.DcMotorEx
 import com.qualcomm.robotcore.hardware.DcMotorSimple
 import com.qualcomm.robotcore.hardware.HardwareMap
-import com.qualcomm.robotcore.hardware.VoltageSensor
 import kotlin.math.abs
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.Clock
@@ -25,7 +24,9 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
  *
  * clamped to 0..1: a flywheel is never braked by reverse power. Commands set
  * [targetRpm]; [periodic] reads the encoder and battery; [writeHardware]
- * computes and writes the power.
+ * computes and writes the power. The battery comes from [batteryVoltsSource];
+ * op-modes pass `{ robot.hubPower.batteryVolts }`, which the hub power sampler
+ * reads anyway, so the shooter adds no hub transaction of its own.
  *
  * Shooting speed eventually comes from [ShotModel.rpmForDistance]; until the
  * model is fitted, callers pass an RPM directly ([spinUp]).
@@ -34,11 +35,11 @@ class ShooterSubsystem(
     private val motorNames: List<String> = RobotConfig.Shooter.MOTORS,
     private val feedbackMotor: String = RobotConfig.Shooter.FEEDBACK_MOTOR,
     private val clock: Clock = Clock.SYSTEM,
+    private val batteryVoltsSource: () -> Double,
 ) : SubsystemBase("Shooter") {
 
     private var motors: List<DcMotorEx> = emptyList()
     private var encoder: DcMotorEx? = null
-    private var voltageSensor: VoltageSensor? = null
 
     /** Commanded flywheel speed; null means stopped. Set by commands only. */
     var targetRpm: Double? = null
@@ -63,7 +64,6 @@ class ShooterSubsystem(
     private var shotArmed = false
 
     private var batteryVolts = Double.NaN
-    private var lastVoltageReadNs = Long.MIN_VALUE
     private var integral = 0.0
     private var lastError = Double.NaN
     private var lastControlNs = Long.MIN_VALUE
@@ -87,20 +87,13 @@ class ShooterSubsystem(
             }
         }
         encoder = motors[motorNames.indexOf(feedbackMotor)]
-        voltageSensor = hardwareMap.voltageSensor.iterator().let { if (it.hasNext()) it.next() else null }
     }
 
     override fun periodic() {
         // Direction applies to the reading too: positive is launching speed.
         measuredRpm = (encoder?.velocity ?: 0.0) / ShooterConfig.ticksPerRev * 60.0
         countShots()
-        // Battery voltage is not in the bulk read: one extra hub read every 100 ms.
-        val now = clock.nanos()
-        val sensor = voltageSensor
-        if (sensor != null && (lastVoltageReadNs == Long.MIN_VALUE || now - lastVoltageReadNs >= 100_000_000L)) {
-            batteryVolts = sensor.voltage
-            lastVoltageReadNs = now
-        }
+        batteryVolts = batteryVoltsSource()
     }
 
     private fun countShots() {

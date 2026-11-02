@@ -38,7 +38,7 @@ class FlowerCycleAutoTest {
     private val down = MotorProbe()
     private val intakeMotor = MotorProbe()
     private val feederMotor = MotorProbe()
-    private val shooter = ShooterSubsystem(clock = hardware.clock)
+    private val shooter = ShooterSubsystem(clock = hardware.clock) { Double.NaN }
     private val intake = IntakeSubsystem()
     private val feeder = FeederSubsystem()
     private val auto = TestAuto()

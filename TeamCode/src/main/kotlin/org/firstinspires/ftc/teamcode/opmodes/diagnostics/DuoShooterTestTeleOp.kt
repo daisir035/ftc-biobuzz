@@ -31,7 +31,7 @@ class DuoShooterTestTeleOp : OpModeBase() {
     override val publishFieldView: Boolean get() = false
 
     override fun configure() {
-        shooter = robot.register(ShooterSubsystem())
+        shooter = robot.register(ShooterSubsystem { robot.hubPower.batteryVolts })
         driver.trigger { driver.r2 > 0.1 }.whileTrue(shooter.spinUp())
         driver.button(Button.DPAD_UP).onTrue(instant { ShooterConfig.targetRpm += 100.0 })
         driver.button(Button.DPAD_DOWN).onTrue(instant { ShooterConfig.targetRpm -= 100.0 })

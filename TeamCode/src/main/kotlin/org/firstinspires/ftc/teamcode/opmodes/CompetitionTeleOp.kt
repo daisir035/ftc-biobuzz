@@ -65,7 +65,7 @@ class CompetitionTeleOp : TeleOpBase() {
     override fun configureTeleop() {
         intake = robot.register(IntakeSubsystem())
         feeder = robot.register(FeederSubsystem())
-        shooter = robot.register(ShooterSubsystem())
+        shooter = robot.register(ShooterSubsystem { robot.hubPower.batteryVolts })
         shovel = robot.register(ShovelSubsystem())
         shovel.defaultCommand = shovel.holdOffsetDegrees {
             if (shovelExtended) ShovelConfig.preset2OffsetDegrees else ShovelConfig.preset1OffsetDegrees

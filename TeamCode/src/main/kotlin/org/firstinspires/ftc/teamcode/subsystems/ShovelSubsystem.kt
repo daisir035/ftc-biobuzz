@@ -54,10 +54,14 @@ class ShovelSubsystem : SubsystemBase("Shovel") {
             val right = ShovelConfig.rightAlignedPosition
             val requested = degrees()
             val fullyLowered = ShovelConfig.fullyLoweredOffsetDegrees
-            require(left in 0.0..1.0 && right in 0.0..1.0 && requested.isFinite() &&
-                fullyLowered.isFinite() && fullyLowered >= 0.0
+            // A Panels typo must not throw: this is a default command, so it
+            // would fault again every tick. Go limp until the value is fixed.
+            if (left !in 0.0..1.0 || right !in 0.0..1.0 || !requested.isFinite() ||
+                !fullyLowered.isFinite() || fullyLowered < 0.0
             ) {
-                "Shovel alignment must be in 0..1 and angle must be finite"
+                offsetDegrees = Double.NaN
+                enabled = false
+                return@infinite
             }
             offsetDegrees = requested.coerceIn(
                 -min(left, right) * 300.0,

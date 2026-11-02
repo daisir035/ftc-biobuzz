@@ -24,7 +24,7 @@ class ScoringTest {
     private val down = MotorProbe()
     private val intake = IntakeSubsystem()
     private val feeder = FeederSubsystem()
-    private val shooter = ShooterSubsystem(clock = clock)
+    private val shooter = ShooterSubsystem(clock = clock) { Double.NaN }
     private val events = mutableListOf<String>()
     private val scoring = Scoring(intake, feeder, shooter, clock) { events += it }
 

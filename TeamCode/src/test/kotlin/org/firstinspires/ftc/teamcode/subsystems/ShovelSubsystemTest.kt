@@ -148,4 +148,21 @@ class ShovelSubsystemTest {
         assertEquals(0.135, shovel.leftPosition, 1e-9)
         assertEquals(0.0, shovel.rightPosition, 1e-9)
     }
+
+    @Test
+    fun anInvalidPanelsValueGoesLimpInsteadOfFaultingEveryTick() {
+        ShovelConfig.leftAlignedPosition = 1.2 // typo: outside 0..1
+        ShovelConfig.rightAlignedPosition = 0.225
+        val command = shovel.holdOffsetDegrees { 0.0 }
+        Scheduler.schedule(command)
+        tick()
+        assertTrue(Scheduler.isScheduled(command))
+        assertFalse(shovel.enabled)
+        assertFalse(enabled.getValue(0))
+
+        ShovelConfig.leftAlignedPosition = 0.36 // fixed in Panels
+        tick()
+        assertTrue(shovel.enabled)
+        assertEquals(0.36, shovel.leftPosition, 1e-9)
+    }
 }

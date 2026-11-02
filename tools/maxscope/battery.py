@@ -126,3 +126,4 @@ def analyze(records):
         # Total current at which the weakest resting voltage of the run would sag to brownout.
         "headroomAmps": (lowest_rest - BROWNOUT_VOLTS) / resistance if resistance > 0 else None,
     }
+

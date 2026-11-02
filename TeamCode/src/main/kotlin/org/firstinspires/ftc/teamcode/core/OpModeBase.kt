@@ -9,7 +9,6 @@ import com.qualcomm.robotcore.hardware.HardwareMap
 import com.qualcomm.robotcore.util.RobotLog
 import org.firstinspires.ftc.teamcode.RobotConfig
 import org.firstinspires.ftc.teamcode.core.logging.TelemetryBag
-import org.firstinspires.ftc.teamcode.pedro.Constants
 import org.firstinspires.ftc.teamcode.subsystems.DriveTelemetrySource
 
 /**
@@ -230,11 +229,11 @@ object Preflight {
     data class Requirement(val name: String, val type: Class<out HardwareDevice>)
 
     /** The devices every op-mode in this template needs: drive + localizer. */
-    val standard: List<Requirement> get() = listOf(
-        Requirement(Constants.drivetrainConfig.frontLeftName.get(), DcMotorEx::class.java),
-        Requirement(Constants.drivetrainConfig.frontRightName.get(), DcMotorEx::class.java),
-        Requirement(Constants.drivetrainConfig.backLeftName.get(), DcMotorEx::class.java),
-        Requirement(Constants.drivetrainConfig.backRightName.get(), DcMotorEx::class.java),
+    val standard: List<Requirement> = listOf(
+        Requirement(RobotConfig.Drive.FRONT_LEFT_MOTOR, DcMotorEx::class.java),
+        Requirement(RobotConfig.Drive.FRONT_RIGHT_MOTOR, DcMotorEx::class.java),
+        Requirement(RobotConfig.Drive.BACK_LEFT_MOTOR, DcMotorEx::class.java),
+        Requirement(RobotConfig.Drive.BACK_RIGHT_MOTOR, DcMotorEx::class.java),
         Requirement(RobotConfig.Localization.PINPOINT, GoBildaPinpointDriver::class.java),
     )
 

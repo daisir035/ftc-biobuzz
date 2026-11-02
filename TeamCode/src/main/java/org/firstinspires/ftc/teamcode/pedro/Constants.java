@@ -16,21 +16,25 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 import java.util.function.DoubleSupplier;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.teamcode.RobotConfig;
 import org.firstinspires.ftc.teamcode.subsystems.DriveConfig;
 
 /**
  * Pedro Pathing 3 constants for this robot, in the layout AutoTune generates
  * (https://pedropathing.com/docs/pathing/tuning/constants). Paste AutoTune's
- * Java output over the matching block. Drivetrain hardware names live here;
- * preflight checks and motor logging read this same configuration.
+ * Java output over the matching block; keep the hardware names pointing at
+ * {@link RobotConfig}.
  *
  * <p>Provenance of every value:
  * <ul>
  *   <li>Motor names and directions: ported from the team's Quickstart project
  *       (verified on hardware 2026-09-14). Re-check with AutoTune's Mecanum
  *       procedure on the competition chassis.</li>
- *   <li>Pinpoint offsets and directions: AutoTune's Pinpoint Tuner output, run
- *       on this robot. Pedro 2's forwardPodY/strafePodX map to
+ *   <li>Pinpoint offsets and directions: the team's 2026-11-01 Pinpoint Tuner
+ *       run (the tuner with the read-before-Stop direction fix, now upstream in
+ *       Pedro-Pathing/Quickstart) and a Drive Only push test. The tuner can flip
+ *       an offset's sign (Pedro issue #185): an in-place spin should hold
+ *       position within about 1 in. Pedro 2's forwardPodY/strafePodX map to
  *       xPodOffset/yPodOffset: both versions pass them to
  *       {@code GoBildaPinpointDriver.setOffsets(x, y)} in that order.</li>
  *   <li>Foresight: AutoTune's Foresight procedure output, pasted verbatim into
@@ -61,10 +65,10 @@ public final class Constants {
     public static final double NOMINAL_VOLTS = 12.0;
 
     public static final MecanumConfig drivetrainConfig = new MecanumConfig(c -> {
-        c.frontLeftName.set("FL");
-        c.frontRightName.set("FR");
-        c.backLeftName.set("BL");
-        c.backRightName.set("BR");
+        c.frontLeftName.set(RobotConfig.Drive.FRONT_LEFT_MOTOR);
+        c.frontRightName.set(RobotConfig.Drive.FRONT_RIGHT_MOTOR);
+        c.backLeftName.set(RobotConfig.Drive.BACK_LEFT_MOTOR);
+        c.backRightName.set(RobotConfig.Drive.BACK_RIGHT_MOTOR);
 
         c.frontLeftDirection.set(DcMotorSimple.Direction.REVERSE);
         c.frontRightDirection.set(DcMotorSimple.Direction.FORWARD);
@@ -72,10 +76,10 @@ public final class Constants {
         c.backRightDirection.set(DcMotorSimple.Direction.FORWARD);
     });
 
-    public static PinpointConfig localizerConfig = new PinpointConfig(c -> {
+    public static final PinpointConfig localizerConfig = new PinpointConfig(c -> {
         // Latest measured offsets. Both directions confirmed REVERSED by the user's
         // 2026-11-01 re-run of the Pinpoint Tuner and the Drive Only push test.
-        c.name.set("pinpoint");
+        c.name.set(RobotConfig.Localization.PINPOINT);
         c.podType.set(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
         c.xPodOffset.set(1.733931744192529);
         c.yPodOffset.set(3.517399585153174);
@@ -88,7 +92,7 @@ public final class Constants {
 
 
     /** AutoTune's Foresight procedure output, pasted verbatim. */
-    public static ForesightConfig foresightConfig = new ForesightConfig(
+    public static final ForesightConfig foresightConfig = new ForesightConfig(
             c -> {
                 Controller primaryTranslationalForward = Controller.proportional(0.3149776271663011);
                 Controller secondaryTranslationalForward = Controller.proportional(0.11637581688074408);

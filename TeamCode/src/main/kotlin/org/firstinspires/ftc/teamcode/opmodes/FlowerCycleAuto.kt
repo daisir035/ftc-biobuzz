@@ -72,7 +72,7 @@ open class FlowerCycleAutoRed : AutoBase() {
     override fun configureMechanisms() {
         intake = robot.register(IntakeSubsystem())
         feeder = robot.register(FeederSubsystem())
-        shooter = robot.register(ShooterSubsystem(clock = robot.clock))
+        shooter = robot.register(ShooterSubsystem(clock = robot.clock) { robot.hubPower.batteryVolts })
         shovel = robot.register(ShovelSubsystem())
         scoring = Scoring(intake, feeder, shooter, robot.clock, robot::recordEvent)
         shovel.defaultCommand = shovel.holdOffsetDegrees {

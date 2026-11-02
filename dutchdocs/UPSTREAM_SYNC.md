@@ -129,3 +129,20 @@ Host tests cannot validate these changes physically. Before competition use:
   condition, Distance input in Line/Curve tests) alongside Pedro 3.0.2 and
   AutoTune 1.0.3. They are not copied: AutoTune 1.0.3 needs Sloth 0.3.2
   (see AI-GUIDE). Re-copy all four together when the toolchain moves.
+
+## 2026-11-01: review of the 2026-10-25 exclusions
+
+Re-checked independently instead of trusting the record above:
+
+- `7728b54` (`monotonicWaitMs` → Ivy `waitMs`): **still excluded.** Ivy
+  1.1.1's `Commands.waitMs` uses `System.currentTimeMillis()` (checked in the
+  published `core-1.1.1-sources.jar`).
+- `d92e2d2`, `ae5ef5e`, `830cfdf` (sensorbot Pinpoint/Foresight values):
+  **still excluded**; they are another chassis.
+- `2b0f404` (simplified vision): **now taken.** This robot has only a
+  Limelight, used for AprilTags; no ball camera, and no turret yet for the
+  HIVE tracker. Vision is upstream's `GoalAim` + `LimelightSubsystem` +
+  `Vision Test`; `PoseHistory`, `registerAfter` and `SettingsChangeLog` went
+  with it. The full estimator is at upstream tag `vision-full`.
+- Drive motor names are back in `RobotConfig.Drive` (left front, right front,
+  left rear, right rear) and `Constants` points at them, as upstream does.

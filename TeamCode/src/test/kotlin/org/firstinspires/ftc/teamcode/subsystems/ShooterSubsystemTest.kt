@@ -2,12 +2,10 @@ package org.firstinspires.ftc.teamcode.subsystems
 
 import com.pedropathing.ivy.Scheduler
 import com.qualcomm.robotcore.hardware.DcMotorSimple
-import com.qualcomm.robotcore.hardware.VoltageSensor
 import org.firstinspires.ftc.teamcode.core.Clock
 import org.firstinspires.ftc.teamcode.core.sim.ConfigSnapshot
 import org.firstinspires.ftc.teamcode.core.sim.FakeHardwareMap
 import org.firstinspires.ftc.teamcode.core.sim.MotorProbe
-import org.firstinspires.ftc.teamcode.core.sim.deviceProxy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -21,7 +19,8 @@ class ShooterSubsystemTest {
     private val down = MotorProbe()
     private val hardware = FakeHardwareMap()
     private var now = 0L
-    private val shooter = ShooterSubsystem(clock = Clock { now })
+    private var volts = Double.NaN
+    private val shooter = ShooterSubsystem(clock = Clock { now }) { volts }
 
     @Before
     fun setUp() {
@@ -103,9 +102,7 @@ class ShooterSubsystemTest {
 
     @Test
     fun batteryVoltageScalesTheFeedforward() {
-        hardware.voltageSensor.put("battery", deviceProxy(VoltageSensor::class.java) { name, _ ->
-            if (name == "getVoltage") 10.0 else null
-        })
+        volts = 10.0
         ShooterConfig.kP = 0.0
         shooter.init(hardware)
         Scheduler.schedule(shooter.spinUp { 1000.0 })
@@ -117,7 +114,7 @@ class ShooterSubsystemTest {
     fun standaloneTestReadsItsOwnEncoder() {
         val probe = MotorProbe()
         hardware.put("shoot", probe.device)
-        val single = ShooterSubsystem(listOf("shoot"), feedbackMotor = "shoot")
+        val single = ShooterSubsystem(listOf("shoot"), feedbackMotor = "shoot") { Double.NaN }
         single.init(hardware)
         probe.velocity = 1730.0
         single.periodic()
