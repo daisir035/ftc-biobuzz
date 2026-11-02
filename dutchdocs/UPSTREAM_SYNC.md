@@ -101,3 +101,31 @@ Host tests cannot validate these changes physically. Before competition use:
    the full algorithms were retained, not revalidated by this sync.
 4. Verify R2 shooter tests, PIDF logging, safe stop, and both Default Auto
    alliances with the robot initially on blocks and then in a clear field area.
+
+## 2026-11-01: record upstream `89622ee` in history
+
+- Merged `sync-upstream` (a real `git merge` of `upstream/master` `89622ee`
+  plus small fixes) into `auto-framework` with this branch's tree kept
+  unchanged. Upstream had already been applied selectively on 2026-10-25
+  (above); this merge only records that, so the next sync starts from
+  `89622ee` instead of re-presenting the same 60+ commits as conflicts.
+- Every conflict and every cleanly merged upstream change resolved to this
+  branch: the exclusions above still hold (full vision, `PoseHistory`,
+  `monotonicWaitMs`, `registerAfter`, `toggleOnTrue`, this robot's Pinpoint
+  and Foresight values). The `sync-upstream` fixes are superseded here by
+  `Scoring`, the Shooter NaN guard and the Feeder `spinning` gate.
+- Next sync: `git merge upstream/master` and resolve only what upstream
+  changed after `89622ee`.
+
+### AutoTune procedures vs Pedro-Pathing/Quickstart
+
+- `PinpointTuner.java` is the team's fix 3494d7a ("Read Pinpoint direction
+  before Stop, not after"). It was merged into Pedro-Pathing/Quickstart
+  (PR #115, 2026-10-08), and the file here is byte-identical to the
+  official Quickstart `HEAD` (checked 2026-11-01). It is official code now.
+- `MecanumTuner.java` matches both b4312385 and `HEAD`.
+- `ForesightTuner.java` and `Tests.java` are still b4312385. Quickstart has
+  since changed them (Foresight NaN/runaway stop, braking-test stop
+  condition, Distance input in Line/Curve tests) alongside Pedro 3.0.2 and
+  AutoTune 1.0.3. They are not copied: AutoTune 1.0.3 needs Sloth 0.3.2
+  (see AI-GUIDE). Re-copy all four together when the toolchain moves.
