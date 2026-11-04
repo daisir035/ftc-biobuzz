@@ -304,9 +304,14 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   The velocity PIDF runs in `ShooterSubsystem` (motors in
   `RUN_WITHOUT_ENCODER`, FLOAT at zero power):
   `power = kF·target·(nominalVolts/battery) + kP·err + kI·∫err + kD·d(err)/dt`,
-  clamped to 0..1, I term limited to `iLimit`.
+  clamped to 0..1, I term limited to `iLimit`. With `bangBang` true it is
+  WPILib's bang-bang + feedforward instead:
+  `power = (measured < target ? 1 : 0) + bangBangFeedforwardScale·kF·target·(nominalVolts/battery)`
+  (scale 0.9; kP/kI/kD ignored). Fastest spin-up and shot recovery; needs
+  a tuned `kF`.
 - Everything is live in Panels: `ShooterConfig` (`targetRpm`, `nearRpm`,
-  `farRpm`, `speedToleranceRpm`, `kF/kP/kI/kD`, `iLimit`, `nominalVolts`,
+  `farRpm`, `speedToleranceRpm`, `kF/kP/kI/kD`, `iLimit`, `bangBang`,
+  `bangBangFeedforwardScale`, `nominalVolts`,
   `ticksPerRev` 103.8), `IntakeConfig.collectPower/ejectPower`,
   `FeederConfig.feedPower`. Nothing is persisted: type tuned values back
   into the code.

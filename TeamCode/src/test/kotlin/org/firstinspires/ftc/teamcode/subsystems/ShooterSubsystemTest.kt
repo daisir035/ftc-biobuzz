@@ -31,6 +31,8 @@ class ShooterSubsystemTest {
         ShooterConfig.kP = 0.001
         ShooterConfig.kI = 0.0
         ShooterConfig.kD = 0.0
+        ShooterConfig.bangBang = false
+        ShooterConfig.bangBangFeedforwardScale = 0.9
         ShooterConfig.ticksPerRev = 103.8
     }
 
@@ -108,6 +110,35 @@ class ShooterSubsystemTest {
         Scheduler.schedule(shooter.spinUp { 1000.0 })
         tick()
         assertEquals(0.6, up.power, 1e-9) // 0.0005 * 1000 * 12 / 10.
+    }
+
+    @Test
+    fun bangBangRunsFullBelowTargetAndScaledFeedforwardAtOrAbove() {
+        ShooterConfig.bangBang = true
+        ShooterConfig.kI = 1.0 // Ignored in bang-bang mode.
+        volts = 10.0
+        shooter.init(hardware)
+        Scheduler.schedule(shooter.spinUp { 1000.0 })
+
+        up.velocity = 1557.0 // 900 RPM: below target.
+        tick()
+        assertEquals(1.0, up.power, 0.0)
+        assertEquals(1.0, down.power, 0.0)
+
+        up.velocity = 1730.0 // 1000 RPM: at target, feedforward only.
+        tick()
+        assertEquals(0.54, up.power, 1e-9) // 0.9 * 0.0005 * 1000 * 12 / 10.
+
+        up.velocity = 3460.0 // 2000 RPM: above target, still never reversed.
+        tick()
+        assertEquals(0.54, up.power, 1e-9)
+
+        // Back to PID: no integral carried over from the bang-bang ticks.
+        ShooterConfig.bangBang = false
+        ShooterConfig.kI = 0.0
+        ShooterConfig.kP = 0.0
+        tick()
+        assertEquals(0.6, up.power, 1e-9)
     }
 
     @Test

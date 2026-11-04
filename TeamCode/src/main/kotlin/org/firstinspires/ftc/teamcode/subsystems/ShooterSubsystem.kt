@@ -22,6 +22,10 @@ import org.firstinspires.ftc.teamcode.core.logging.logged
  *
  * `power = kF · target · (nominalVolts / battery) + kP · error + kI · ∫error + kD · d(error)/dt`
  *
+ * or, with [ShooterConfig.bangBang], WPILib's bang-bang plus feedforward:
+ *
+ * `power = (measured < target ? 1 : 0) + bangBangFeedforwardScale · kF · target · (nominalVolts / battery)`
+ *
  * clamped to 0..1: a flywheel is never braked by reverse power. Commands set
  * [targetRpm]; [periodic] reads the encoder and battery; [writeHardware]
  * computes and writes the power. The battery comes from [batteryVoltsSource];
@@ -133,8 +137,18 @@ class ShooterSubsystem(
             resetController()
             return 0.0
         }
-        val dt = if (lastControlNs == Long.MIN_VALUE) 0.0 else (now - lastControlNs) / 1e9
         val voltageScale = if (batteryVolts.isFinite() && batteryVolts > 6.0) c.nominalVolts / batteryVolts else 1.0
+        val feedforward = c.kF * target * voltageScale
+        if (c.bangBang) {
+            // Full power below target, scaled-down feedforward at or above it
+            // (https://docs.wpilib.org/en/stable/docs/software/advanced-controls/controllers/bang-bang.html).
+            // No PID state while it runs, so switching back starts clean.
+            resetController()
+            val bang = if (measuredRpm < target) 1.0 else 0.0
+            val output = bang + c.bangBangFeedforwardScale * feedforward
+            return if (output.isFinite()) output.coerceIn(0.0, 1.0) else 0.0
+        }
+        val dt = if (lastControlNs == Long.MIN_VALUE) 0.0 else (now - lastControlNs) / 1e9
         if (dt > 0.0) {
             integral += error * dt
             // Anti-windup: the I term alone never exceeds iLimit power.
@@ -143,7 +157,7 @@ class ShooterSubsystem(
         val derivative = if (dt > 0.0 && lastError.isFinite()) (error - lastError) / dt else 0.0
         lastError = error
         lastControlNs = now
-        val output = c.kF * target * voltageScale + c.kP * error + c.kI * integral + c.kD * derivative
+        val output = feedforward + c.kP * error + c.kI * integral + c.kD * derivative
         return if (output.isFinite()) output.coerceIn(0.0, 1.0) else 0.0
     }
 
@@ -236,6 +250,21 @@ object ShooterConfig {
 
     /** Largest power the I term may contribute. */
     @JvmField var iLimit = 0.2
+
+    /**
+     * Bang-bang instead of PID: full power below target, otherwise
+     * [bangBangFeedforwardScale] × the [kF] feedforward. Fastest spin-up and
+     * recovery after a shot; kP/kI/kD are ignored. Only for a flywheel that
+     * coasts (FLOAT), which this one does.
+     */
+    @JvmField var bangBang = false
+
+    /**
+     * Fraction of the [kF] feedforward used with [bangBang]. Below 1 so the
+     * feedforward alone settles just under target and the bang-bang tops it
+     * up; WPILib suggests 0.9.
+     */
+    @JvmField var bangBangFeedforwardScale = 0.9
 
     /** Battery voltage [kF] was tuned at; kF is scaled by nominal / measured. */
     @JvmField var nominalVolts = 12.0
