@@ -25,6 +25,8 @@ import org.firstinspires.ftc.teamcode.subsystems.MecanumDriveSubsystem.TeleopInp
  *  - **Create + Triangle** — reset heading to zero (Create, not Options:
  *    Options+Cross/Circle are the Driver Station's gamepad re-bind chords)
  *  - **Create + Circle** — toggle field-centric / robot-centric
+ *  - **dpad left** (hold) — defense: lock position and heading where the
+ *    robot is; release to drive again. Refused after a localizer fault.
  *
  * Localization starts at (0, 0, 0) every run; nothing is restored from a
  * previous op-mode (see [LocalizerSubsystem]).
@@ -88,6 +90,7 @@ abstract class TeleOpBase : OpModeBase() {
         (driver.button(Button.CREATE) and driver.button(Button.CIRCLE)).onTrue(
             instant { drive.toggleFieldCentric() },
         )
+        driver.button(Button.DPAD_LEFT).whileTrue(drive.holdPositionCommand())
         configureTeleop()
     }
 

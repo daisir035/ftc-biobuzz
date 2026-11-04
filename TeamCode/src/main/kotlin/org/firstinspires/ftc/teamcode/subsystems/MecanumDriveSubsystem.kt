@@ -39,6 +39,7 @@ import org.firstinspires.ftc.teamcode.pedro.VoltageCompensatedMecanum
  *    after its timeout (a bounded wait, not a failure).
  *  - [turnToCommand]: on measured heading, or after its timeout (a bounded
  *    wait, so the routine moves on).
+ *  - [holdPositionCommand]: never; it holds until interrupted.
  *
  * Each command cleans up at most once per start, because Ivy 1.1.1 can end
  * a command that never started, or end one twice (AI-GUIDE.md).
@@ -225,6 +226,32 @@ class MecanumDriveSubsystem(
                 val reached = updateCount > updatesAtStart &&
                     abs(shortestAngleDelta(heading, radians)) < DriveConfig.holdToleranceRadians
                 reached || (clock.nanos() - startNs) / 1e6 >= timeoutMs
+            }
+            .setEnd {
+                if (running) halt()
+                running = false
+            }
+        return logged(name, command)
+    }
+
+    /**
+     * Defense: lock the robot where it is now (position and heading) and push
+     * back against contact until interrupted. Pedro's hold controller does the
+     * work, so it needs Foresight and a live localizer like [holdCommand].
+     * Interruption stops the follower; the teleop default then drives again.
+     */
+    fun holdPositionCommand(name: String = "Drive hold position"): Command {
+        var running = false
+        val command = Command.build()
+            .requiring(this)
+            .setStart {
+                running = true
+                requirePathControl("hold position")
+                val here = follower.pose()
+                check(here.x().isFinite() && here.y().isFinite() && here.heading().isFinite()) {
+                    "hold position needs a finite pose, got $here"
+                }
+                follower.hold(here)
             }
             .setEnd {
                 if (running) halt()

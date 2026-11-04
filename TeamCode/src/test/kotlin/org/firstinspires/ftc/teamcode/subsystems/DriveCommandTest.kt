@@ -258,6 +258,33 @@ class DriveCommandTest {
     }
 
     @Test
+    fun holdPositionLocksTheCurrentPoseUntilInterrupted() {
+        val h = Harness()
+        val here = Pose(10.0, 20.0, 1.5)
+        h.place(here)
+        h.tick()
+        val hold = h.drive.holdPositionCommand()
+        Scheduler.schedule(hold)
+        assertEquals("HOLDING", h.drive.driveModeName)
+        val held = h.drive.follower.poseAt(0.0)
+        assertEquals(10.0, held.x(), 1e-9)
+        assertEquals(20.0, held.y(), 1e-9)
+        assertEquals(1.5, held.heading(), 1e-9)
+
+        // Pushed off the spot: it keeps holding and drives back.
+        h.place(Pose(16.0, 20.0, 1.5))
+        repeat(50) { h.tick() }
+        assertTrue(Scheduler.isScheduled(hold))
+        assertEquals("HOLDING", h.drive.driveModeName)
+        assertTrue(h.hardware.powers().any { it != 0.0 })
+
+        Scheduler.cancel(hold)
+        assertArrayEquals(DoubleArray(4), h.hardware.powers(), 1e-9)
+        h.tick()
+        assertEquals("IDLE", h.drive.driveModeName)
+    }
+
+    @Test
     fun holdTimeoutIsABoundedWaitAndTheFollowerKeepsHolding() {
         val h = Harness()
         val hold = h.drive.holdCommand(Pose(24.0, 0.0, 0.0), timeoutMs = 500.0)

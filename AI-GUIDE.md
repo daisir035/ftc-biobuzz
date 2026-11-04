@@ -239,6 +239,7 @@ drive.followCommand(path, holdEnd = false)       // ends when Pedro leaves FOLLO
 drive.holdCommand(pose, timeoutMs = 2000.0)      // ends on measured arrival, or timeout (bounded wait)
 drive.turnToCommand(radians, timeoutMs = 2000.0) // ends on measured heading, or timeout (bounded wait)
 drive.robotCentricFallbackCommand { input }      // localizer-fault policy; the only prioritized command
+drive.holdPositionCommand()                      // defense: hold the current pose until interrupted (teleop dpad left)
 drive.pathProgress()                             // latched 0..1 over all segments, for markers
 drive.pose / drive.velocity / drive.atPose(target) / drive.toggleFieldCentric()
 ```

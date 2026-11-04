@@ -346,7 +346,9 @@ still an unconfigured skeleton** — its `init` fails explicitly.
   and 125°. The shovels hold 0° after START and disable PWM on STOP. The
   aligned reference is left 0.36/right 0.225, and the measured fully lowered
   limit is 133° (`ShovelConfig`). Create+Triangle/Create+Circle drive chords
-  remain.
+  remain, and dpad left (hold, every teleop) is defense: the drive locks its
+  current position and heading with Pedro's hold and pushes back; release
+  returns the sticks.
 - `opmodes/FlowerRoute.kt` is the FLOWER route, shared by Flower Cycle and
   Just Path: start (57.3401, 7.4974, −90°) → first FLOWER (23.3387, 42.5526,
   180°) → far shot (66.0339, 115.8782, 90°) → second FLOWER (55.782,
